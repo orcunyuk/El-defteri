@@ -382,14 +382,23 @@ function lockPassword(mode, cloudVault) {
     <form id="lockForm" class="lock-form">
       ${userField}
       <div class="list">
-        <input class="lock-input" type="password" name="p1" autocomplete="${yeni ? 'new-password' : 'current-password'}" placeholder="${yeni ? 'Yeni şifre (en az 6 karakter)' : 'Şifre'}" required minlength="${yeni ? 6 : 1}" aria-label="Şifre">
-        ${yeni ? '<input class="lock-input" type="password" name="p2" autocomplete="new-password" placeholder="Şifre (tekrar)" required minlength="6" aria-label="Şifre tekrar">' : ''}
+        <input class="lock-input" type="password" name="p1" inputmode="${S.settings.pwKlavye || 'numeric'}" autocomplete="${yeni ? 'new-password' : 'current-password'}" placeholder="${yeni ? 'Yeni şifre (en az 6 hane)' : 'Şifre'}" required minlength="${yeni ? 6 : 1}" aria-label="Şifre">
+        ${yeni ? `<input class="lock-input" type="password" name="p2" inputmode="${S.settings.pwKlavye || 'numeric'}" autocomplete="new-password" placeholder="Şifre (tekrar)" required minlength="6" aria-label="Şifre tekrar">` : ''}
       </div>
       <button class="btn primary block lg" type="submit">${yeni ? 'Başla' : 'Aç'}</button>
       <p class="err" id="lockErr" role="alert"></p>
       ${yeni ? '<p class="hint center">Şifreyi unutursan veriler kurtarılamaz.</p>' : ''}
+      <button type="button" class="btn link sm" id="kbBtn">${(S.settings.pwKlavye || 'numeric') === 'numeric' ? 'ABC klavye' : '123 klavye'}</button>
       ${mode === 'migrate' ? '<button type="button" class="btn link sm" id="freshBtn">Şifremi hatırlamıyorum, sıfırdan başla</button>' : ''}
     </form>`);
+  // Rakam / harf klavyesi arasında geçiş (tercih hatırlanır)
+  $('#kbBtn').addEventListener('click', () => {
+    const yeniMod = (S.settings.pwKlavye || 'numeric') === 'numeric' ? 'text' : 'numeric';
+    S.settings.pwKlavye = yeniMod; db.metaSet('settings', S.settings);
+    for (const inp of $('#lockForm').querySelectorAll('input[type=password]')) inp.setAttribute('inputmode', yeniMod);
+    $('#kbBtn').textContent = yeniMod === 'numeric' ? 'ABC klavye' : '123 klavye';
+    const f = $('#lockForm').p1; f.blur(); setTimeout(() => f.focus(), 50);
+  });
   $('#freshBtn')?.addEventListener('click', async () => {
     if (!confirm('Bu cihazdaki eski kayıtlar silinecek ve yeni, boş bir defterle başlayacaksın. Devam edilsin mi?')) return;
     await db.clearData();
@@ -1152,9 +1161,10 @@ const ACT = {
   },
   paket: () => paketFlow(),
   chpw: () => openSheet('Şifreyi değiştir', `${userField}
-    ${field('Mevcut şifre', 'old', '', { type: 'password', required: true, autocomplete: 'current-password' })}
-    ${field('Yeni şifre', 'p1', '', { type: 'password', required: true, autocomplete: 'new-password', extra: 'minlength="6"' })}
-    ${field('Yeni şifre (tekrar)', 'p2', '', { type: 'password', required: true, autocomplete: 'new-password', extra: 'minlength="6"' })}
+    ${field('Mevcut şifre', 'old', '', { type: 'password', required: true, autocomplete: 'current-password', inputmode: S.settings.pwKlavye || 'numeric' })}
+    ${field('Yeni şifre', 'p1', '', { type: 'password', required: true, autocomplete: 'new-password', inputmode: 'numeric', extra: 'minlength="6"' })}
+    ${field('Yeni şifre (tekrar)', 'p2', '', { type: 'password', required: true, autocomplete: 'new-password', inputmode: 'numeric', extra: 'minlength="6"' })}
+    <p class="hint">Yalnızca rakamdan oluşan bir şifre seçersen girişte rakam klavyesi yeter. Güvenlik için en az 8 hane önerilir.</p>
     <p class="hint">Daha önce aldığın yedekler, alındıkları andaki şifreyle açılmaya devam eder.</p>`,
   { onSubmit: async (f, fd) => {
     if (fd.get('p1') !== fd.get('p2')) { toast('Yeni şifreler aynı değil'); return false; }
