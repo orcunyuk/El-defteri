@@ -38,14 +38,55 @@ async function ocr() {
   }
   return ocrWorker;
 }
+// OCR öncesi görüntü iyileştirme: uygun boyuta büyüt, gri tonla, bölgesel eşikle siyah-beyaz yap.
+// Renkli tablo zeminleri, filigran ve fotoğraftaki gölgeler böylece silinir.
+async function prepare(img) {
+  const src = img instanceof HTMLCanvasElement ? img : await createImageBitmap(img);
+  const scale = Math.min(3, Math.max(1, 2000 / src.width));
+  const w = Math.round(src.width * scale), h = Math.round(src.height * scale);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(src, 0, 0, w, h);
+  src.close?.();
+  const d = x.getImageData(0, 0, w, h), a = d.data;
+  const g = new Uint8ClampedArray(w * h);
+  for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = 0.299 * a[i] + 0.587 * a[i + 1] + 0.114 * a[i + 2];
+  // İntegral görüntü ile pencere ortalaması
+  const I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let xx = 0; xx < w; xx++) { row += g[y * w + xx]; I[(y + 1) * (w + 1) + xx + 1] = I[y * (w + 1) + xx + 1] + row; }
+  }
+  const r = Math.max(12, Math.round(w / 80));
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+    for (let xx = 0; xx < w; xx++) {
+      const x0 = Math.max(0, xx - r), x1 = Math.min(w, xx + r + 1);
+      const sum = I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0];
+      const mean = sum / ((x1 - x0) * (y1 - y0));
+      const v = g[y * w + xx];
+      const k = (y * w + xx) * 4;
+      a[k] = a[k + 1] = a[k + 2] = (v < mean * 0.88 && v < 200) ? 0 : 255;
+    }
+  }
+  x.putImageData(d, 0, 0);
+  return c;
+}
 async function ocrImage(img, onProgress) {
   ocrProgress = m => {
     if (m.status === 'recognizing text') onProgress?.(`Yazı tanınıyor… %${Math.round(m.progress * 100)}`);
     else if (m.status) onProgress?.('Yazı tanıma hazırlanıyor…');
   };
   const w = await ocr();
-  const { data } = await w.recognize(img);
-  return data.text;
+  onProgress?.('Görüntü hazırlanıyor…');
+  const c = await prepare(img);
+  await w.setParameters({ preserve_interword_spaces: '1' });
+  const { data } = await w.recognize(c);
+  c.width = c.height = 0;
+  // 3+ boşluk = sütun aralığı (PDF'teki \t gibi)
+  return data.text.split('\n').map(l => l.replace(/ {3,}/g, '\t').replace(/\s*\|\s*/g, '\t').trim()).join('\n');
 }
 
 // PDF metnini satırlara ayır (aynı yükseklikteki parçalar = bir satır)
@@ -115,24 +156,25 @@ const FOLD = { 'Ç': 'c', 'ç': 'c', 'Ğ': 'g', 'ğ': 'g', 'İ': 'i', 'I': 'i', 
 // Uzunluğu koruyarak küçük harfe ve aksansıza çevirir (eşleşme konumu orijinal metinde de geçerli olsun diye)
 const fold = s => s.replace(/[\s\S]/g, c => { const f = FOLD[c] ?? c.toLowerCase(); return f.length === 1 ? f : c; });
 const COL = /[\t‖]/;
-const JUNK = /^[\s‖:.\-–—=|;_!'"“”]+/;
+const JUNK = /^[\s‖:.,\-–—=|;_!'"“”‘’]+/;
 
 const L = {
-  unvan: [/^adi\s*\/\s*unvani\b/, /mukellefin\s+(?:adi\s+soyadi|unvani|adi)(?:\s*[/,]\s*unvani)?/, /adi\s*soyadi\s*[/,]?\s*\(?unvani\)?/, /^soyadi\s*\(unvani\)/, /ticaret\s+unvani/, /^unvani?\b/],
+  unvan: [/^adi\s*\/\s*unvani\b/, /^ad\s*-?\s*soyad\s*\/\s*unvan\b/, /mukellefin\s+(?:adi\s+soyadi|unvani|adi)(?:\s*[/,]\s*unvani)?/, /adi\s*soyadi\s*[/,]?\s*\(?unvani\)?/, /^soyadi\s*\(unvani\)/, /ticaret\s+unvani/, /^unvani?\b/],
   unvanDevam: [/^adi\s*\(unvanin\s+devami\)/],
   konu: [/^konu\b/],
+  vknTckn: [/^vkn\s*[/i1l|]?\s*tckn\b/],
   vkn: [/vergi\s+kimlik\s+(?:no|numarasi)\b(?:\s*\(t\.?c\.?\s*kimlik\s+no\))?/, /^v\.?\s?k\.?\s?n\.?\b/, /\bvkn\s*:/],
   tckn: [/t\.?\s?c\.?\s+kimlik\s+(?:no|numarasi)\b/, /\btckn\b/],
   vd: [/vergi\s+dairesi(?:\s+mudurlugu)?\s*:/, /bagli\s+oldugu\s+vergi\s+dairesi\b/, /^vergi\s+dairesi(?=[\t‖])/],
   donem: [/incelenecek\s+(?:donem|yil)(?:ler)?(?:i)?\b/, /inceleme(?:ye\s+tabi)?\s+donem(?:i|leri)?\b/, /^(?:vergilendirme\s+)?donemi\b/],
   kapsam: [/^kapsami?\b/, /inceleme(?:nin)?\s+(?:kapsami|turu|sekli)\b/],
   vergiTuru: [/^vergi\s+turu\b/, /incelenecek\s+vergi\s+turu\b/],
-  faaliyet: [/^isi\b/, /faaliyet\s+konusu\s*:/, /^meslegi\b/],
+  faaliyet: [/^isi\b/, /^faaliyet\s+konusu\b/, /faaliyet\s+konusu\s*:/, /^meslegi\b/],
   gerekce: [/^(?:incelemenin\s+)?gerekcesi\b/],
   isEmriNo: [/is\s+emri(?:nin)?\s+(?:no|numarasi|sayisi)\b/, /^sayi(?:si)?\b/],
   isEmriTarihi: [/is\s+emri(?:nin)?\s+tarihi\b/, /^tarih(?:i)?\b/, /\btarih(?:i)?\s*:/],
-  adres: [/is\s*yeri\s+adresi\b/, /ikametgah\s+adresi\b/, /^adres(?:i)?\s*:/],
-  tel: [/irtibat\s+tel(?:efon)?(?:\s+no)?/, /(?:cep\s+)?telefon(?:\s+(?:no|numarasi))?\b/, /^tel\b/, /\btel\s*:/],
+  adres: [/is\s*yeri\s+adresi\b/, /ikametgah\s+adresi\b/, /^adres(?:i)?\s*:/, /^(?:is\s*yeri\s+)?adres(?:i)?\b(?!\s*(?:no|bilgi|kodu))/],
+  tel: [/irtibat\s+tel(?:efon)?(?:\s+no)?/, /(?:cep\s+)?telefon(?:u|\s+(?:no|numarasi))?\b/, /^tel\b/, /\btel\s*:/],
   eposta: [/e-?\s?posta(?:\s+adresi)?/],
 };
 const ALL_LABELS = Object.values(L).flat().map(r => new RegExp(r.source.replace(/^\^/, '(?:^|\\s)'), r.flags));
@@ -159,6 +201,45 @@ function after(lines, res, { nextLine = true } = {}) {
     }
   }
   return '';
+}
+// Uzun bir değer alt satıra taştıysa (alt satır etiket/sütun içermiyorsa) birleştir
+function afterLong(lines, res) {
+  const v = after(lines, res);
+  if (!v) return v;
+  const i = lines.findIndex(l => l.includes(v));
+  const next = lines[i + 1];
+  if (i >= 0 && lines[i].length >= 90 && next && !COL.test(next) && !ALL_LABELS.some(r => r.test(fold(next))) && next.length < 120) return v + ' ' + next;
+  return v;
+}
+// VKN ve TCKN kontrol haneleri (OCR hatalarını ayıklamak için)
+function validVKN(n) {
+  if (!/^\d{10}$/.test(n)) return false;
+  const d = [...n].map(Number);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) { const t = (d[i] + 9 - i) % 10; let v = (t * 2 ** (9 - i)) % 9; if (t && !v) v = 9; sum += v; }
+  return (10 - (sum % 10)) % 10 === d[9];
+}
+function validTCKN(n) {
+  if (!/^[1-9]\d{10}$/.test(n)) return false;
+  const d = [...n].map(Number);
+  const a = ((d[0] + d[2] + d[4] + d[6] + d[8]) * 7 - (d[1] + d[3] + d[5] + d[7])) % 10;
+  return (a + 10) % 10 === d[9] && d.slice(0, 10).reduce((x, y) => x + y) % 10 === d[10];
+}
+// Metindeki kimlik numarasını bulur; OCR'ın karıştırdığı/eklediği karakteri kontrol hanesiyle düzeltir
+function idNumber(raw) {
+  const mapped = raw.replace(/[Oo]/g, '0').replace(/[Il|]/g, '1').replace(/B/g, '8').replace(/S/g, '5').replace(/Z/g, '2');
+  for (const s of [raw, mapped]) {
+    const d = s.replace(/\D/g, '');
+    if (validVKN(d)) return d;
+    if (validTCKN(d)) return d;
+    if (d.length === 11 || d.length === 12) for (let i = 0; i < d.length; i++) {
+      const c = d.slice(0, i) + d.slice(i + 1);
+      if (c.length === 10 && validVKN(c)) return c;
+      if (c.length === 11 && validTCKN(c)) return c;
+    }
+  }
+  const d = raw.replace(/\D/g, '');
+  return d.length === 10 || d.length === 11 ? d : '';
 }
 function toISO(s) {
   const m = /(?<![\d.\-/])(\d{1,2})[./](\d{1,2})[./](\d{4})(?!\d)/.exec(s || '');
@@ -201,18 +282,20 @@ function vergiDairesi(s) {
   s = clean(s.replace(/^\d+\s*-\s*/, '').replace(/vergi\s+dairesi\s+müdürlüğü/i, ''));
   if (!hasWord(s) || s.length > 60) return '';
   if (isUpper(s)) s = title(s);
-  return s.replace(/\bMalmd\.?(?=\s|$)/i, 'Malmüdürlüğü').replace(/\b(?:Vd|V\.d)\.?(?=\s|$)/, 'Vergi Dairesi');
+  return s.replace(/\bDkm\b/, 'DKM').replace(/\bMalmd\.?(?=\s|$)/i, 'Malmüdürlüğü').replace(/\b(?:Vd|V\.d)\.?(?=\s|$)/, 'Vergi Dairesi');
 }
 
 export function parse(text) {
-  let lines = text.split(/\r?\n/).map(l => l.replace(/[ ]+/g, ' ').trim()).filter(Boolean);
+  // Satır başındaki tablo çizgisi artıklarını (— / | “ .) temizle
+  let lines = text.split(/\r?\n/).map(l => l.replace(/[ ]+/g, ' ').trim().replace(/^[\s—–\-_/|.,;:'"“”‘’]+(?=[A-Za-zÇĞİÖŞÜçğıöşü0-9])/, '')).filter(Boolean);
   // Antet/altbilgi (imza, doğrulama, kurum adresi, KEP) mükellef bilgisi değildir
   const sig = lines.findIndex(l => /bu belge,?\s+guvenli\s+elektronik\s+imza/.test(fold(l)));
   if (sig > 0) lines = lines.slice(0, sig);
   lines = lines.filter(l => !/belge\s+dogrulama|kep\s+adresi|internet\s+adresi|faks\s+no|bilgi\s+icin|www\./.test(fold(l)));
   const F = fold(lines.join('\n'));
   const isEmri = /is\s+emri|inceleme\s+emri/.test(F) || (/vergi\s+denetim\s+kurulu/.test(F) && /nezdinde|incelemenin|incelenmesi/.test(F));
-  const tur = isEmri ? 'İş emri' : /beyanname/.test(F) ? 'Beyanname' : /tutanak/.test(F) ? 'Tutanak' : null;
+  const yoklama = /yoklama\s+fisi|e-?yoklama/.test(F);
+  const tur = isEmri ? 'İş emri' : yoklama ? 'Yoklama fişi' : /beyanname/.test(F) ? 'Beyanname' : /tutanak/.test(F) ? 'Tutanak' : null;
 
   // Beyannamelerde "Beyannameyi düzenleyen" bölümü: sol yarı mükellef, sağ yarı SMMM
   let main = lines, smmm = [];
@@ -237,9 +320,15 @@ export function parse(text) {
   if (hasWord(unvan) && unvan.length <= 160) out.unvan = unvan;
 
   // VKN (10 hane) ve TCKN (11 hane) ayrı tutulur
+  // Yoklama fişi: "VKN/TCKN : 966-005-1082 / 177-829-767-82"
+  for (const part of after(main, L.vknTckn).split('/')) {
+    const n = idNumber(part);
+    if (n.length === 10) out.vkn ??= n;
+    if (n.length === 11) out.tckn ??= n;
+  }
   const tcLabel = /vergi\s+kimlik\s+(?:no|numarasi)\s*\(t\.?\s?c/.test(F);
   [[after(main, L.vkn), true], [after(main, L.tckn), false]].forEach(([v, vknLabel]) => {
-    const n = v.replace(/\s/g, '').match(/\d{10,11}/)?.[0];
+    const n = idNumber(v.replace(/\s/g, '').match(/[\dOoIlBSZ|]{10,12}/)?.[0] || '');
     if (n?.length === 10) out.vkn ??= n;
     if (n?.length === 11) {
       // VKN etiketinin altında '1' ile başlayan 11 hane: OCR'ın ':' işaretini '1' okuması
@@ -252,7 +341,8 @@ export function parse(text) {
   let vd = vergiDairesi(after(main, L.vd));
   if (!vd) for (const l of head) { const m = /^(.+?)\s+v\.?\s?d\.?(?=[\s\t‖]|$)/.exec(fold(l)); if (m) { vd = vergiDairesi(l.slice(0, m[1].length) + ' VD'); break; } }
   if (!vd) { const m = /([a-z]+(?: [a-z]+)?) vergi dairesi\b/.exec(F); if (m) vd = vergiDairesi(lines.join('\n').slice(m.index, m.index + m[1].length) + ' VD'); }
-  if (vd) out.vergiDairesi = vd;
+  // Yoklama fişindeki DKM, yoklamayı yapan birimdir; mükellefin vergi dairesi değil
+  if (vd && !(yoklama && /\bdkm\b|denetim/i.test(vd))) out.vergiDairesi = vd;
 
   // Dönem: iş emrinde "Dönemi : 2024"; beyannamede başlıktaki "Yıl 2024" (+ "Ay Ekim")
   let donem = clean(after(main, L.donem));
@@ -273,8 +363,8 @@ export function parse(text) {
 
   const vt = clean(after(main, L.vergiTuru));
   if (hasWord(vt) && vt.length < 80) out.vergiTuru = vergiTuru(vt);
-  const is = clean(after(main, L.faaliyet));
-  if (hasWord(is) && is.length < 200) out.faaliyet = isUpper(is) ? sentence(is) : is;
+  const is = clean(afterLong(main, L.faaliyet).replace(/^\d{6}\s*-\s*/, ''));
+  if (hasWord(is) && is.length < 300) out.faaliyet = isUpper(is) ? sentence(is) : is;
   const ger = clean(after(main, L.gerekce));
   if (hasWord(ger) && ger.length < 120) out.gerekce = isUpper(ger) ? sentence(ger) : ger;
 
@@ -286,8 +376,9 @@ export function parse(text) {
     if (t) out.isEmriTarihi = t;
   }
 
-  const adres = clean(after(main, L.adres));
-  if (adres.length > 8 && adres.length < 200 && !/http|dogrulama/.test(fold(adres))) out.adres = adres;
+  let adres = clean(afterLong(main, L.adres)).replace(/\s+(?=[,/])|(?<=[/])\s+/g, '').replace(/\s*İ[çÇ] KAPI NO:\s*(?=\S*\/|$)/i, ' ').trim();
+  if (isUpper(adres)) adres = title(adres).replace(/\bNo\b:?/g, 'No:').replace(/:\s*/g, ': ');
+  if (adres.length > 8 && adres.length < 250 && !/http|dogrulama/.test(fold(adres))) out.adres = adres;
 
   // Kişiler
   const kisiler = [];
@@ -305,7 +396,10 @@ export function parse(text) {
 
   // Belge için kısa açıklama
   let baslik = '';
-  if (tur === 'İş emri') baslik = ['İş emri', out.vergiTuru, out.donem].filter(Boolean).join(' · ');
+  if (tur === 'Yoklama fişi') {
+    const t = /(?:bitis\s+zamani|gorev\s+bitis)[^\n]*?(\d{2}[./]\d{2}[./]\d{4})/.exec(F)?.[1] || (F.match(/\d{2}[./]\d{2}[./]\d{4}/) || [])[0];
+    baslik = ['Yoklama fişi', t?.replace(/\//g, '.')].filter(Boolean).join(' · ');
+  } else if (tur === 'İş emri') baslik = ['İş emri', out.vergiTuru, out.donem].filter(Boolean).join(' · ');
   else if (tur === 'Beyanname') {
     const t = lines.find(l => /beyannamesi\b/.test(fold(l)));
     if (t) baslik = [sentence(clean(t.split(COL)[0])), out.donem].filter(Boolean).join(' · ');

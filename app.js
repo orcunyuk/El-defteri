@@ -66,7 +66,7 @@ const I = {
 const TURLER = [['telefon', '📞 Telefon'], ['yuzyuze', '🤝 Yüz yüze'], ['yazi', '📄 Resmi yazı'], ['eposta', '✉️ E-posta'], ['diger', '📝 Diğer / not']];
 const TUR_LABEL = Object.fromEntries(TURLER);
 const INC_TUR = { tam: 'Tam inceleme', sinirli: 'Sınırlı inceleme' };
-const BELGE_TUR = ['İş emri', 'Beyanname', 'Tutanak', 'Yazışma / tebligat', 'Defter / kayıt', 'Fatura / banka', 'Diğer'];
+const BELGE_TUR = ['İş emri', 'Beyanname', 'Yoklama fişi', 'Tutanak', 'Yazışma / tebligat', 'Defter / kayıt', 'Fatura / banka', 'Diğer'];
 const ROLLER = ['Mükellef', 'Şirket yetkilisi', 'SMMM / muhasebeci', 'Avukat / vekil', 'Çalışan', 'Diğer'];
 const GOREV_SABLON = ['Defter ve belge ibraz süresi', 'Ek süre sonu', 'Bilgi isteme yazısı cevap süresi', 'Karşıt inceleme sonucu', 'Tutanak düzenlenecek', 'Rapor teslimi'];
 
@@ -374,12 +374,83 @@ function ozetHTML(m) {
     </div>`;
 }
 
+// Mükellef ile SMMM aynı e-postayı kullanabilir: yalnızca aynı kişi ya da aynı roldeki aynı iletişim birleşir
+function mergeKisiler(list, found) {
+  const kisiler = (list || []).map(k => ({ ...k }));
+  for (const k of found) {
+    const same = kisiler.find(x => fold(x.ad) === fold(k.ad) || (x.rol === k.rol && ((k.tel && telHref(x.tel) === telHref(k.tel)) || (k.eposta && x.eposta === k.eposta))));
+    if (same && same.tel && k.tel && telHref(same.tel) !== telHref(k.tel)) {
+      if (!kisiler.some(x => telHref(x.tel) === telHref(k.tel))) kisiler.push({ id: uid(), ad: k.ad, rol: k.rol, tel: k.tel, eposta: k.eposta || '' });
+    } else if (same) { same.tel ||= k.tel || ''; same.eposta ||= k.eposta || ''; }
+    else kisiler.push({ id: uid(), ad: k.ad || '', rol: k.rol || '', tel: k.tel || '', eposta: k.eposta || '' });
+  }
+  return kisiler;
+}
+
+/* ---------- hazır dosya paketi (Claude'un belgelerden hazırladığı .json) ---------- */
+const M_FIELDS = ['unvan', 'kod', 'vkn', 'tckn', 'vergiDairesi', 'faaliyet', 'incelemeTuru', 'donem', 'vergiTuru', 'gerekce', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres'];
+async function importPaket(obj) {
+  const p = obj.mukellef || {};
+  const m = all('mukellef').find(x => (p.vkn && x.vkn === p.vkn) || (p.tckn && x.tckn === p.tckn));
+  const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
+  // Var olan dosyada dolu alanların üzerine yazılmaz; yalnızca boşlar doldurulur
+  for (const k of M_FIELDS) if (p[k] && !item[k]) item[k] = String(p[k]).trim();
+  if (p.not && !(item.not || '').includes(p.not.trim())) item.not = [item.not, p.not.trim()].filter(Boolean).join('\n\n');
+  if (item.baslamaTarihi && !item.bitisTarihi) item.bitisTarihi = addMonths(item.baslamaTarihi, item.incelemeTuru === 'sinirli' ? 6 : 12);
+  item.kisiler = mergeKisiler(item.kisiler, obj.kisiler || []);
+  await save(item);
+  const n = { belge: 0, gorev: 0, kayit: 0 };
+  const mevcut = byM('belge', item.id);
+  for (const b of obj.belgeler || []) {
+    if (!b.data) continue;
+    const bytes = cr.unb64(b.data);
+    if (mevcut.some(x => x.ad === b.ad && x.size === bytes.length)) continue;
+    const fileId = uid();
+    await saveFile(fileId, bytes);
+    await save({ id: uid(), kind: 'belge', mid: item.id, tur: BELGE_TUR.includes(b.tur) ? b.tur : 'Diğer', ad: b.ad || 'belge', mime: b.mime || 'application/pdf', size: bytes.length, aciklama: b.aciklama || '', fileId });
+    n.belge++;
+  }
+  for (const g of obj.gorevler || []) {
+    if (!g.baslik || !g.tarih || byM('gorev', item.id).some(x => x.baslik === g.baslik && x.tarih === g.tarih)) continue;
+    await save({ id: uid(), kind: 'gorev', mid: item.id, baslik: g.baslik, tarih: g.tarih, not: g.not || '', bitti: false });
+    n.gorev++;
+  }
+  for (const k of obj.kayitlar || []) {
+    if (byM('kayit', item.id).some(x => x.tarih === k.tarih && x.konu === (k.konu || ''))) continue;
+    await save({ id: uid(), kind: 'kayit', mid: item.id, tarih: k.tarih || localDT(), tur: k.tur || 'diger', kisi: k.kisi || '', konu: k.konu || '', metin: k.metin || '', sesler: [] });
+    n.kayit++;
+  }
+  return { item, yeni: !m, n };
+}
+async function paketFlow() {
+  const file = await pickFile('application/json,.json');
+  if (!file) return;
+  let obj;
+  try { obj = JSON.parse(await file.text()); if (obj.app !== 'el-defteri-paket') throw new Error(); } catch { return toast('Bu dosya bir El Defteri paketi değil'); }
+  const p = obj.mukellef || {};
+  const var_ = all('mukellef').find(x => (p.vkn && x.vkn === p.vkn) || (p.tckn && x.tckn === p.tckn));
+  openSheet('Paketi içe aktar', `
+    <div class="card">
+      <div class="row-title">${esc(p.unvan || 'Adsız dosya')}</div>
+      <div class="row-sub">${esc([p.vkn && 'VKN ' + p.vkn, p.tckn && 'TCKN ' + p.tckn, p.donem, INC_TUR[p.incelemeTuru]].filter(Boolean).join(' · '))}</div>
+      <p class="muted">${(obj.belgeler || []).length} belge · ${(obj.kisiler || []).length} kişi · ${(obj.kayitlar || []).length} not · ${(obj.gorevler || []).length} süre</p>
+    </div>
+    ${var_ ? `<p class="banner">Bu mükellefin dosyası zaten var: <b>${esc(var_.unvan)}</b>. Boş alanlar doldurulacak, yeni belge, kişi ve notlar eklenecek; mevcut bilgilerin üzerine yazılmayacak.</p>` : ''}
+    <p class="hint">Aktarımdan sonra paket dosyasını Dosyalar uygulamasından silebilirsin; bilgiler uygulamada şifreli saklanır.</p>`,
+  { submitLabel: 'Aktar', onSubmit: async () => {
+    const r = await importPaket(obj);
+    location.hash = `#/m/${r.item.id}`;
+    toast(`${r.yeni ? 'Dosya oluşturuldu' : 'Dosya güncellendi'} · ${r.n.belge} belge, ${r.n.kayit} not eklendi`);
+  } });
+}
+
 function mukellefSheet(m = null) {
   const v = m || { incelemeTuru: 'tam' };
   const docs = [];      // eklenecek belgeler: { file, tur }
   const foundKisi = []; // belgeden bulunan kişiler
   const form = openSheet(m ? 'Dosyayı düzenle' : 'Yeni dosya', `
     <div class="autofill">
+      ${m ? '' : `<button type="button" class="btn block" data-act="paket">📦 Hazır paketi içe aktar</button>`}
       <button type="button" class="btn primary block" data-autofill>${I.doc} Belgeden doldur</button>
       <p class="hint">İş emri, beyanname vb. seç (PDF, taranmış belge ya da fotoğraf). Bilgiler telefonun içinde okunur, hiçbir yere gönderilmez. Seçilen belgeler dosyaya da eklenir.</p>
       <div class="af-status" aria-live="polite"></div>
@@ -400,13 +471,7 @@ function mukellefSheet(m = null) {
   { onSubmit: async (f, fd) => {
     const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
     for (const k of ['unvan', 'kod', 'vkn', 'tckn', 'vergiDairesi', 'faaliyet', 'incelemeTuru', 'donem', 'vergiTuru', 'gerekce', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'not']) item[k] = String(fd.get(k) ?? '').trim();
-    const kisiler = [...(item.kisiler || [])];
-    for (const k of foundKisi) {
-      // Mükellef ile SMMM aynı e-postayı kullanabilir: yalnızca aynı rol ya da aynı kişi birleşir
-      const same = kisiler.find(x => fold(x.ad) === fold(k.ad) || (x.rol === k.rol && ((k.tel && telHref(x.tel) === telHref(k.tel)) || (k.eposta && x.eposta === k.eposta))));
-      if (same) { same.tel ||= k.tel; same.eposta ||= k.eposta; } else kisiler.push({ id: uid(), ...k });
-    }
-    item.kisiler = kisiler;
+    item.kisiler = mergeKisiler(item.kisiler, foundKisi);
     await save(item);
     for (const d of docs) {
       const fileId = uid();
@@ -736,7 +801,7 @@ function renderSettings() {
       <h2 class="sec">Tehlikeli bölge</h2>
       <button class="btn danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </section>
-    <p class="muted center">El Defteri 1.2</p>
+    <p class="muted center">El Defteri 1.3</p>
   </div>`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   (async () => {
@@ -886,6 +951,7 @@ const ACT = {
     toast('Yedek kaydedildi');
   },
   importBackup: () => importFlow(),
+  paket: () => paketFlow(),
   chpw: () => openSheet('Şifreyi değiştir', `${userField}
     ${field('Mevcut şifre', 'old', '', { type: 'password', required: true, autocomplete: 'current-password' })}
     ${field('Yeni şifre', 'p1', '', { type: 'password', required: true, autocomplete: 'new-password', extra: 'minlength="6"' })}

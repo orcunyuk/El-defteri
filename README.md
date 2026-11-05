@@ -10,6 +10,27 @@ Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
 - **Süreler:** Görev ve süre listesi. Ana sayfada son 7 gün kalan süreler ve son 30 gün kalan inceleme bitişleri görünür. Süreler alarmlı olarak iPhone Takvimi'ne (.ics) eklenebilir.
 - **Yedekleme:** Şifreli tek dosya yedek alınır ve geri yüklenir.
 
+## Hazır dosya paketi (`.eldefteri.json`)
+
+İnceleme belgeleri Claude'a verilip okutulabilir. Claude bilgileri bu biçimde bir pakete yazar, paket de uygulamada **Yeni dosya → 📦 Hazır paketi içe aktar** ile alınır. Aynı VKN ya da TCKN'ye sahip bir dosya varsa yeni dosya açılmaz, o dosya güncellenir: yalnızca boş alanlar doldurulur, yeni belge, kişi, not ve süreler eklenir, tekrar edenler atlanır.
+
+```json
+{
+  "app": "el-defteri-paket", "v": 1,
+  "mukellef": { "unvan": "", "kod": "", "vkn": "", "tckn": "", "vergiDairesi": "", "faaliyet": "",
+                "incelemeTuru": "tam|sinirli", "donem": "", "vergiTuru": "", "gerekce": "",
+                "isEmriNo": "", "isEmriTarihi": "YYYY-AA-GG", "baslamaTarihi": "YYYY-AA-GG", "bitisTarihi": "YYYY-AA-GG",
+                "adres": "", "not": "" },
+  "kisiler":  [{ "ad": "", "rol": "", "tel": "", "eposta": "" }],
+  "kayitlar": [{ "tarih": "YYYY-AA-GGTSS:DD", "tur": "telefon|yuzyuze|yazi|eposta|diger", "kisi": "", "konu": "", "metin": "" }],
+  "gorevler": [{ "baslik": "", "tarih": "YYYY-AA-GG", "not": "" }],
+  "belgeler": [{ "ad": "dosya.pdf", "tur": "İş emri|Beyanname|Yoklama fişi|Tutanak|Yazışma / tebligat|Defter / kayıt|Fatura / banka|Diğer",
+                 "aciklama": "", "mime": "application/pdf", "data": "<base64>" }]
+}
+```
+
+Paket şifresizdir. Aktardıktan sonra paket dosyasını Dosyalar uygulamasından silmek gerekir.
+
 ## Gizlilik ve güvenlik
 
 - Veriler **yalnızca cihazda** (IndexedDB) tutulur. Sunucu, bulut ya da analitik yoktur. CSP ayarı dışarıya bağlantıyı engeller.
