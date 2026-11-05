@@ -369,7 +369,14 @@ function lockPassword(mode, cloudVault) {
       <button class="btn primary block lg" type="submit">${yeni ? 'Başla' : 'Aç'}</button>
       <p class="err" id="lockErr" role="alert"></p>
       ${yeni ? '<p class="hint center">Şifreyi unutursan veriler kurtarılamaz.</p>' : ''}
+      ${mode === 'migrate' ? '<button type="button" class="btn link sm" id="freshBtn">Şifremi hatırlamıyorum, sıfırdan başla</button>' : ''}
     </form>`);
+  $('#freshBtn')?.addEventListener('click', async () => {
+    if (!confirm('Bu cihazdaki eski kayıtlar silinecek ve yeni, boş bir defterle başlayacaksın. Devam edilsin mi?')) return;
+    await db.clearData();
+    S.vault = null; S.cloud = null;
+    renderLock();
+  });
   const form = $('#lockForm');
   const err = $('#lockErr');
   if (!/iPhone|iPad|Android/.test(navigator.userAgent)) form.p1.focus();
