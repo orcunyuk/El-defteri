@@ -1,6 +1,5 @@
 import * as db from './db.js';
 import * as cr from './crypto.js';
-import { extractText, parse } from './extract.js';
 import * as cloud from './cloud.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -537,55 +536,49 @@ function renderSureler() {
 }
 
 /* ---------- mükellef dosyası ---------- */
-function renderDetail(id, tab) {
+function renderDetail(id) {
   const m = S.items.get(id);
-  const tabs = [['ozet', 'Özet'], ['kayitlar', 'Görüşmeler'], ['belgeler', 'Belgeler'], ['sureler', 'Süreler']];
-  const body = { ozet: ozetHTML, kayitlar: kayitlarHTML, belgeler: belgelerHTML, sureler: surelerHTML }[tab]?.(m) ?? ozetHTML(m);
-  const fab = {
-    belgeler: `<button class="fab" data-act="newBelge" data-mid="${id}" aria-label="Belge ekle">${I.plus}</button>`,
-    sureler: `<button class="fab" data-act="newGorev" data-mid="${id}" aria-label="Süre ekle">${I.plus}</button>`,
-  }[tab] ?? `<button class="fab" data-act="newKayit" data-mid="${id}" aria-label="Görüşme notu ekle">${I.plus}</button>`;
-  app.innerHTML = header(m.unvan, { back: '#/', backLabel: 'Dosyalar', right: `<button class="nav-btn" data-act="editM" data-id="${id}">Düzenle</button>` }) +
-    `<div class="seg-wrap"><nav class="seg">${tabs.map(([k, l]) => `<a href="#/m/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</nav></div>
-     <div class="page">${body}</div>${fab}${tabbar('dosyalar')}`;
-}
-
-// Kısa değerler sağda, uzunlar etiketin altında (iOS Kişiler uygulaması gibi)
-const kv = (k, v, raw) => { if (!v) return ''; const html = raw ? v : esc(v); const long = String(v).replace(/<[^>]+>/g, '').length > 26;
-  return `<div class="kv${long ? ' stack' : ''}"><span>${esc(k)}</span><b>${html}</b></div>`; };
-function ozetHTML(m) {
+  const box = (l, v, { full = false, raw = false, empty = false } = {}) => (v || empty)
+    ? `<div class="ibox${full ? ' full' : ''}"><span>${esc(l)}</span><b>${v ? (raw ? v : esc(v)) : '—'}</b></div>` : '';
+  const inc = [m.incelemeTuru === 'sinirli' ? 'Sınırlı' : m.incelemeTuru === 'tam' ? 'Tam' : '', m.vergiTuru].filter(Boolean).join(' · ');
   const kisiler = m.kisiler || [];
-  const lc = lastContact(m.id);
-  const nK = byM('kayit', m.id).length, nB = byM('belge', m.id).length, nG = byM('gorev', m.id).filter(g => !g.bitti).length;
-  return `
-    <div class="list">
-      ${kv('Dosya kodu', m.kod)}${kv('VKN', m.vkn)}${kv('TCKN', m.tckn)}${kv('Vergi dairesi', m.vergiDairesi)}
-      ${kv('İnceleme', [INC_TUR[m.incelemeTuru], m.vergiTuru].filter(Boolean).join(' · '))}${kv('Dönem', m.donem)}${kv('Gerekçe', m.gerekce)}
-      ${kv('İş emri', [m.isEmriNo, fmtD(m.isEmriTarihi)].filter(Boolean).join(' · '))}${kv('Başlama', fmtD(m.baslamaTarihi))}
-      ${m.bitisTarihi ? kv('Bitiş süresi', `${esc(fmtD(m.bitisTarihi))} ${isAktif(m) ? badge(m.bitisTarihi) : ''}`, true) : ''}
-      ${kv('Faaliyet', m.faaliyet)}${kv('Adres', m.adres)}${kv('Durum', isAktif(m) ? 'Aktif' : 'Kapandı')}
+  app.innerHTML = header(m.unvan, { back: '#/', backLabel: 'Dosyalar', large: false, right: `<button class="nav-btn" data-act="editM" data-id="${id}">Düzenle</button>` }) +
+    `<div class="page detail">
+      <div class="info-grid">
+        ${box('Adı / Unvanı', m.unvan, { full: true, empty: true })}
+        ${box('VKN', m.vkn, { empty: true })}${box('İnceleme yılı', m.donem, { empty: true })}
+        ${box('Vergi dairesi', m.vergiDairesi, { empty: true })}${box('İnceleme', inc, { empty: true })}
+        ${m.bitisTarihi ? box('Bitiş süresi', `${esc(fmtD(m.bitisTarihi))} ${isAktif(m) ? badge(m.bitisTarihi) : ''}`, { raw: true, full: true }) : ''}
+        ${isAktif(m) ? '' : box('Durum', 'Kapandı', { full: true })}
+      </div>
+      ${[m.tckn, m.isEmriNo, m.isEmriTarihi, m.baslamaTarihi, m.adres, m.faaliyet].some(Boolean) ? `<details class="more"><summary>Diğer bilgiler</summary><div class="info-grid">
+        ${box('TCKN', m.tckn)}${box('Başlama', fmtD(m.baslamaTarihi))}
+        ${box('İş emri', [m.isEmriNo, fmtD(m.isEmriTarihi)].filter(Boolean).join(' · '), { full: true })}
+        ${box('Adres', m.adres, { full: true })}${box('Faaliyet', m.faaliyet, { full: true })}
+      </div></details>` : ''}
+
+      <div class="sec-row"><h2 class="sec">Telefonlar</h2><button class="btn link sm" data-act="kisi" data-mid="${id}">+ Ekle</button></div>
+      ${kisiler.length ? `<div class="tel-grid">${kisiler.map(k => `<div class="tbox">
+          <button class="tbox-main" data-act="kisi" data-mid="${id}" data-kid="${k.id}">
+            <b>${esc(k.ad)}</b>${k.rol ? `<span>${esc(k.rol)}</span>` : ''}
+            ${k.tel ? `<em>${esc(k.tel)}</em>` : k.eposta ? `<em class="mail">${esc(k.eposta)}</em>` : '<em class="none">numara yok</em>'}
+          </button>
+          ${k.tel ? `<a class="call" href="tel:${esc(telHref(k.tel))}" data-act="call" data-mid="${id}" data-kid="${k.id}" aria-label="${esc(k.ad)} ara">${I.phone}</a>`
+            : k.eposta ? `<a class="call mail" href="mailto:${esc(k.eposta)}" aria-label="E-posta gönder">${I.mail}</a>` : ''}
+        </div>`).join('')}</div>`
+        : `<div class="list"><button class="row action" data-act="kisi" data-mid="${id}">Telefon / kişi ekle</button></div>`}
+
+      ${surelerHTML(m)}
+
+      <h2 class="sec">Görüşme notları</h2>
+      ${kayitlarHTML(m)}
+
+      <div class="list end">
+        <button class="row action" data-act="toggleDurum" data-id="${id}">${isAktif(m) ? 'Dosyayı kapat' : 'Dosyayı yeniden aç'}</button>
+        <button class="row action danger-text" data-act="delM" data-id="${id}">Dosyayı sil</button>
+      </div>
     </div>
-    <div class="sec-row"><h2 class="sec">Kişiler</h2><button class="btn link sm" data-act="kisi" data-mid="${m.id}">Ekle</button></div>
-    <div class="list inset-avatar">${kisiler.map(k => `<div class="row">
-        ${avatar(k.ad)}
-        <button class="row-main plain" data-act="kisi" data-mid="${m.id}" data-kid="${k.id}">
-          <div class="row-title">${esc(k.ad)}</div>
-          <div class="row-sub">${esc([k.rol, k.tel].filter(Boolean).join(' · '))}</div>
-        </button>
-        ${k.eposta ? `<a class="round-btn" href="mailto:${esc(k.eposta)}" aria-label="E-posta">${I.mail}</a>` : ''}
-        ${k.tel ? `<a class="round-btn" href="tel:${esc(telHref(k.tel))}" data-act="call" data-mid="${m.id}" data-kid="${k.id}" aria-label="Ara">${I.phone}</a>` : ''}
-      </div>`).join('') || '<p class="empty">Mükellef, yetkili ve muhasebeci iletişim bilgilerini ekle. Buradan aradığında, görüşme bitince not alman hatırlatılır.</p>'}</div>
-    ${m.not ? `<h2 class="sec">Genel not</h2><div class="card pre">${esc(m.not)}</div>` : ''}
-    <div class="list stats">
-      <a href="#/m/${m.id}/kayitlar"><b>${nK}</b><span>görüşme</span></a>
-      <a href="#/m/${m.id}/kayitlar"><b>${lc ? relPast(lc) : '—'}</b><span>son temas</span></a>
-      <a href="#/m/${m.id}/belgeler"><b>${nB}</b><span>belge</span></a>
-      <a href="#/m/${m.id}/sureler"><b>${nG}</b><span>açık süre</span></a>
-    </div>
-    <div class="list">
-      <button class="row action" data-act="toggleDurum" data-id="${m.id}">${isAktif(m) ? 'Dosyayı kapat' : 'Dosyayı yeniden aç'}</button>
-      <button class="row action danger-text" data-act="delM" data-id="${m.id}">Dosyayı sil</button>
-    </div>`;
+    <button class="fab wide" data-act="newKayit" data-mid="${id}">${I.plus}<span>Görüşme notu</span></button>${tabbar('dosyalar')}`;
 }
 
 // Mükellef ile SMMM aynı e-postayı kullanabilir: yalnızca aynı kişi ya da aynı roldeki aynı iletişim birleşir
@@ -613,17 +606,7 @@ async function importPaket(obj) {
   if (item.baslamaTarihi && !item.bitisTarihi) item.bitisTarihi = addMonths(item.baslamaTarihi, item.incelemeTuru === 'sinirli' ? 6 : 12);
   item.kisiler = mergeKisiler(item.kisiler, obj.kisiler || []);
   await save(item);
-  const n = { belge: 0, gorev: 0, kayit: 0 };
-  const mevcut = byM('belge', item.id);
-  for (const b of obj.belgeler || []) {
-    if (!b.data) continue;
-    const bytes = cr.unb64(b.data);
-    if (mevcut.some(x => x.ad === b.ad && x.size === bytes.length)) continue;
-    const fileId = uid();
-    await saveFile(fileId, bytes);
-    await save({ id: uid(), kind: 'belge', mid: item.id, tur: BELGE_TUR.includes(b.tur) ? b.tur : 'Diğer', ad: b.ad || 'belge', mime: b.mime || 'application/pdf', size: bytes.length, aciklama: b.aciklama || '', fileId });
-    n.belge++;
-  }
+  const n = { gorev: 0, kayit: 0 };
   for (const g of obj.gorevler || []) {
     if (!g.baslik || !g.tarih || byM('gorev', item.id).some(x => x.baslik === g.baslik && x.tarih === g.tarih)) continue;
     await save({ id: uid(), kind: 'gorev', mid: item.id, baslik: g.baslik, tarih: g.tarih, not: g.not || '', bitti: false });
@@ -647,93 +630,38 @@ async function paketFlow() {
     <div class="card">
       <div class="row-title">${esc(p.unvan || 'Adsız dosya')}</div>
       <div class="row-sub">${esc([p.vkn && 'VKN ' + p.vkn, p.tckn && 'TCKN ' + p.tckn, p.donem, INC_TUR[p.incelemeTuru]].filter(Boolean).join(' · '))}</div>
-      <p class="muted">${(obj.belgeler || []).length} belge · ${(obj.kisiler || []).length} kişi · ${(obj.kayitlar || []).length} not · ${(obj.gorevler || []).length} süre</p>
+      <p class="muted">${(obj.kisiler || []).length} kişi · ${(obj.kayitlar || []).length} not · ${(obj.gorevler || []).length} süre</p>
     </div>
-    ${var_ ? `<p class="banner">Bu mükellefin dosyası zaten var: <b>${esc(var_.unvan)}</b>. Boş alanlar doldurulacak, yeni belge, kişi ve notlar eklenecek; mevcut bilgilerin üzerine yazılmayacak.</p>` : ''}
+    ${var_ ? `<p class="banner">Bu mükellefin dosyası zaten var: <b>${esc(var_.unvan)}</b>. Boş alanlar doldurulacak, yeni kişi ve notlar eklenecek; mevcut bilgilerin üzerine yazılmayacak.</p>` : ''}
     <p class="hint">Aktarımdan sonra paket dosyasını Dosyalar uygulamasından silebilirsin; bilgiler uygulamada şifreli saklanır.</p>`,
   { submitLabel: 'Aktar', onSubmit: async () => {
     const r = await importPaket(obj);
     location.hash = `#/m/${r.item.id}`;
-    toast(`${r.yeni ? 'Dosya oluşturuldu' : 'Dosya güncellendi'} · ${r.n.belge} belge, ${r.n.kayit} not eklendi`);
+    toast(`${r.yeni ? 'Dosya oluşturuldu' : 'Dosya güncellendi'} · ${r.n.kayit} not eklendi`);
   } });
 }
 
 function mukellefSheet(m = null) {
   const v = m || { incelemeTuru: 'tam' };
-  const docs = [];      // eklenecek belgeler: { file, tur }
-  const foundKisi = []; // belgeden bulunan kişiler
   const form = openSheet(m ? 'Dosyayı düzenle' : 'Yeni dosya', `
-    <div class="autofill">
-      ${m ? '' : `<button type="button" class="btn block" data-act="paket">📦 Hazır paketi içe aktar</button>`}
-      <button type="button" class="btn primary block" data-autofill>${I.doc} Belgeden doldur</button>
-      <p class="hint">İş emri, beyanname vb. seç (PDF, taranmış belge ya da fotoğraf). Bilgiler telefonun içinde okunur, hiçbir yere gönderilmez. Seçilen belgeler dosyaya da eklenir.</p>
-      <div class="af-status" aria-live="polite"></div>
-    </div>
-    ${field('Unvan / Ad Soyad', 'unvan', v.unvan, { required: true })}
-    ${field('Dosya kodu', 'kod', v.kod, { placeholder: 'ör. 2026/14' })}
+    ${m ? '' : '<button type="button" class="btn block" data-act="paket">📦 Hazır paketi içe aktar</button><p class="hint center">ya da bilgileri elle gir</p>'}
+    ${field('Adı / Unvanı', 'unvan', v.unvan, { required: true })}
     <div class="row2">${field('VKN', 'vkn', v.vkn, { inputmode: 'numeric' })}${field('TCKN', 'tckn', v.tckn, { inputmode: 'numeric' })}</div>
-    ${field('Vergi dairesi', 'vergiDairesi', v.vergiDairesi)}
-    ${field('Faaliyet (işi)', 'faaliyet', v.faaliyet)}
-    <div class="row2">${select('İnceleme türü', 'incelemeTuru', v.incelemeTuru, Object.entries(INC_TUR))}${field('İncelenen dönem', 'donem', v.donem, { placeholder: 'ör. 2024' })}</div>
-    <div class="row2">${field('Vergi türü', 'vergiTuru', v.vergiTuru, { placeholder: 'ör. KDV' })}${field('Gerekçe', 'gerekce', v.gerekce)}</div>
+    <div class="row2">${field('İnceleme yılı', 'donem', v.donem, { placeholder: 'ör. 2024' })}${field('Vergi dairesi', 'vergiDairesi', v.vergiDairesi)}</div>
+    <div class="row2">${select('İnceleme türü', 'incelemeTuru', v.incelemeTuru, Object.entries(INC_TUR))}${field('Vergi türü', 'vergiTuru', v.vergiTuru, { placeholder: 'ör. KDV' })}</div>
     <div class="row2">${field('İş emri sayısı', 'isEmriNo', v.isEmriNo)}${field('İş emri tarihi', 'isEmriTarihi', v.isEmriTarihi, { type: 'date' })}</div>
     <div class="row2">${field('İncelemeye başlama', 'baslamaTarihi', v.baslamaTarihi, { type: 'date' })}${field('Bitiş süresi', 'bitisTarihi', v.bitisTarihi, { type: 'date' })}</div>
-    <p class="hint">Bitiş süresi, başlama tarihine göre otomatik önerilir (VUK 140: tam inceleme 12 ay, sınırlı 6 ay; ek süre hariç). Mutlaka kontrol et.</p>
+    <p class="hint">Bitiş süresi başlama tarihine göre önerilir (VUK 140: tam 12 ay, sınırlı 6 ay; ek süre hariç). Kontrol et.</p>
     ${textarea('Adres', 'adres', v.adres, 2)}
-    ${textarea('Genel not', 'not', v.not, 3, { placeholder: 'Faaliyet konusu, dikkat edilecek hususlar…' })}
-    <p class="hint">“Dosya kodu” takvime eklenen hatırlatmalarda unvan yerine kullanılır.</p>`,
+    ${field('Faaliyet', 'faaliyet', v.faaliyet)}
+    ${m ? '' : '<p class="hint">Telefonları dosyayı kaydettikten sonra “Telefonlar → + Ekle” ile eklersin.</p>'}`,
   { onSubmit: async (f, fd) => {
     const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
-    for (const k of ['unvan', 'kod', 'vkn', 'tckn', 'vergiDairesi', 'faaliyet', 'incelemeTuru', 'donem', 'vergiTuru', 'gerekce', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'not']) item[k] = String(fd.get(k) ?? '').trim();
-    item.kisiler = mergeKisiler(item.kisiler, foundKisi);
+    for (const k of ['unvan', 'vkn', 'tckn', 'donem', 'vergiDairesi', 'incelemeTuru', 'vergiTuru', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'faaliyet']) item[k] = String(fd.get(k) ?? '').trim();
     await save(item);
-    for (const d of docs) {
-      const fileId = uid();
-      await saveFile(fileId, await d.file.arrayBuffer());
-      await save({ id: uid(), kind: 'belge', mid: item.id, tur: d.tur, ad: d.file.name, mime: d.file.type || 'application/octet-stream', size: d.file.size, aciklama: d.baslik || '', fileId });
-    }
-    if (docs.length) toast(`${docs.length} belge dosyaya eklendi`);
     if (!m) location.hash = `#/m/${item.id}`;
   } });
   const e = form.elements;
-  const status = form.querySelector('.af-status');
-  const LABELS = { unvan: 'Unvan', vkn: 'VKN', tckn: 'TCKN', vergiDairesi: 'Vergi dairesi', faaliyet: 'Faaliyet', incelemeTuru: 'İnceleme türü', donem: 'Dönem', vergiTuru: 'Vergi türü', gerekce: 'Gerekçe', isEmriNo: 'İş emri sayısı', isEmriTarihi: 'İş emri tarihi', adres: 'Adres' };
-  form.querySelector('[data-autofill]').onclick = async ev => {
-    const btn = ev.currentTarget;
-    const files = await pickFiles('application/pdf,image/*');
-    if (!files.length) return;
-    btn.disabled = true;
-    const filled = new Set();
-    try {
-      // İş emri önce işlensin; ilk bulunan değer geçerli olur
-      const results = [];
-      for (const file of files) {
-        status.textContent = `${file.name}: okunuyor…`;
-        let text = '';
-        try { text = await extractText(file, msg => { status.textContent = `${file.name}: ${msg}`; }); } catch (err) { console.error(err); }
-        const r = parse(text);
-        results.push(r);
-        docs.push({ file, tur: r.tur || 'Diğer', baslik: r.baslik });
-      }
-      results.sort((a, b) => (b.tur === 'İş emri') - (a.tur === 'İş emri'));
-      for (const r of results) {
-        for (const [k, val] of Object.entries(r.fields)) {
-          const el = e[k];
-          if (!el || filled.has(k) || (el.value && !el.dataset.af && !(k === 'incelemeTuru' && !m))) continue;
-          el.value = val; el.dataset.af = '1'; el.classList.add('filled'); filled.add(k);
-          el.addEventListener('input', () => el.classList.remove('filled'), { once: true });
-        }
-        for (const k of r.kisiler) if (!foundKisi.some(x => x.ad === k.ad && x.rol === k.rol)) foundKisi.push(k);
-      }
-      auto();
-      const kisiTxt = foundKisi.map(k => `${k.ad} (${k.rol}${k.tel ? ', ' + k.tel : ''}${k.eposta ? ', ' + k.eposta : ''})`).join('; ');
-      status.innerHTML = filled.size || foundKisi.length
-        ? `<b>Bulunanlar:</b> ${esc([...filled].map(k => LABELS[k]).join(', ') || '—')}${kisiTxt ? `<br><b>Kişiler:</b> ${esc(kisiTxt)}` : ''}<br><span class="muted">Fosforlu alanları belgeyle karşılaştırıp kontrol et. ${files.length} belge kaydedince dosyaya eklenecek.</span>`
-        : `Belgeden bilgi okunamadı; alanları elle doldurabilirsin. ${files.length} belge yine de dosyaya eklenecek.`;
-    } finally {
-      btn.disabled = false;
-    }
-  };
   const auto = () => {
     if (!e.baslamaTarihi.value || (e.bitisTarihi.value && !e.bitisTarihi.dataset.auto)) return;
     e.bitisTarihi.value = addMonths(e.baslamaTarihi.value, e.incelemeTuru.value === 'sinirli' ? 6 : 12);
@@ -871,52 +799,6 @@ function kayitSheet(mid, k = null, preset = {}) {
   sheetCleanup = () => rec.cancel();
 }
 
-/* ---------- belgeler ---------- */
-function belgelerHTML(m) {
-  const bs = byM('belge', m.id).sort((a, b) => b.created - a.created);
-  if (!bs.length) return '<p class="empty">İş emri, beyannameler, tutanaklar ve yazışmaları PDF veya fotoğraf olarak ekle. Belgeler bu cihazda şifreli saklanır.</p>';
-  return BELGE_TUR.map(t => {
-    const g = bs.filter(b => (BELGE_TUR.includes(b.tur) ? b.tur : 'Diğer') === t);
-    return g.length ? `<section><h2 class="sec">${esc(t)}</h2><div class="list">${g.map(b => `
-      <button class="row" data-act="openBelge" data-id="${b.id}"><span class="row-icon">${I.doc}</span>
-        <div class="row-main"><div class="row-title">${esc(b.aciklama || b.ad)}</div>
-        <div class="row-sub">${esc(b.aciklama ? b.ad + ' · ' : '')}${fmtSize(b.size)} · ${fmtTs(b.created)}</div></div></button>`).join('')}</div></section>` : '';
-  }).join('');
-}
-function belgeSheet(mid) {
-  openSheet('Belge ekle', `
-    ${select('Belge türü', 'tur', 'Beyanname', BELGE_TUR.map(t => [t, t]))}
-    <label class="fld"><span>Dosya(lar)</span><input type="file" name="dosya" multiple required accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx,.txt"></label>
-    ${field('Açıklama (isteğe bağlı)', 'aciklama', '', { placeholder: 'ör. 2025 Ekim KDV beyannamesi' })}
-    <p class="hint">Belgeyi kamerayla çekmek için dosya seçerken “Fotoğraf Çek” ya da “Belgeleri Tara” seçeneğini kullan.</p>`,
-  { submitLabel: 'Ekle', onSubmit: async (f, fd) => {
-    const files = fd.getAll('dosya').filter(x => x && x.size);
-    if (!files.length) { toast('Dosya seç'); return false; }
-    for (const file of files) {
-      const fileId = uid();
-      await saveFile(fileId, await file.arrayBuffer());
-      await save({ id: uid(), kind: 'belge', mid, tur: fd.get('tur'), ad: file.name, mime: file.type || 'application/octet-stream', size: file.size, aciklama: fd.get('aciklama').trim(), fileId });
-    }
-    toast(`${files.length} belge eklendi`);
-  } });
-}
-async function openBelge(id) {
-  const b = S.items.get(id);
-  const blob = await loadFile(b.fileId, b.mime);
-  if (!blob) return toast('Dosya bulunamadı');
-  const url = trackURL(blob);
-  const view = b.mime.startsWith('image/') ? `<img class="viewer-img" src="${url}" alt="">`
-    : b.mime === 'application/pdf' ? `<iframe class="viewer-pdf" src="${url}" title="PDF"></iframe>`
-    : '<p class="empty">Bu dosya türü burada gösterilemiyor. “Aç / Paylaş” ile başka bir uygulamada açabilirsin.</p>';
-  openSheet(b.aciklama || b.ad, `${view}
-    <div class="btn-row">
-      <button type="button" class="btn primary" data-act="shareBelge">Aç / Paylaş</button>
-      <a class="btn" href="${url}" download="${esc(b.ad)}">İndir</a>
-      <button type="button" class="btn danger-text" data-act="delBelge" data-id="${id}">Sil</button>
-    </div>
-    <p class="hint">“Paylaş” belgeyi uygulamanın dışına çıkarır; yalnızca güvendiğin yere kaydet.</p>`, { wide: true });
-  S.viewerFile = new File([blob], b.ad, { type: b.mime });
-}
 async function shareOrDownload(file) {
   if (navigator.canShare?.({ files: [file] })) {
     try { await navigator.share({ files: [file] }); return true; } catch (e) { if (e.name === 'AbortError') return false; }
@@ -936,18 +818,15 @@ function surelerHTML(m) {
   const row = g => `<div class="row">
     <button class="check${g.bitti ? ' on' : ''}" data-act="toggleGorev" data-id="${g.id}" aria-label="Tamamlandı olarak işaretle">${g.bitti ? '✓' : ''}</button>
     <button class="row-main plain" data-act="editGorev" data-id="${g.id}">
-      <div class="row-title${g.bitti ? ' strike' : ''}">${esc(g.baslik)}</div>
+      <div class="row-title wrap${g.bitti ? ' strike' : ''}">${esc(g.baslik)}</div>
       <div class="row-sub">${fmtD(g.tarih)}${g.not ? ' · ' + esc(g.not) : ''}</div>
     </button>
     ${g.bitti ? '' : badge(g.tarih)}
-    ${g.bitti ? '' : `<button class="icon-btn tint" data-act="icsGorev" data-id="${g.id}" aria-label="Takvime ekle">${I.cal}</button>`}
+    ${g.bitti ? '' : `<button class="icon-btn" data-act="icsGorev" data-id="${g.id}" aria-label="Takvime ekle">${I.cal}</button>`}
   </div>`;
-  return `
-    ${m.bitisTarihi ? `<section class="card bitis"><div><div class="muted">İnceleme bitiş süresi</div><b>${fmtD(m.bitisTarihi)}</b> ${isAktif(m) ? badge(m.bitisTarihi) : ''}</div>
-      <button class="icon-btn tint" data-act="icsBitis" data-mid="${m.id}" aria-label="Takvime ekle">${I.cal}</button></section>` : ''}
-    <section><h2 class="sec">Açık süreler ve görevler</h2><div class="list">${open.map(row).join('') || '<p class="empty">Açık süre yok. İbraz süresi, ek süre, cevap süreleri gibi tarihleri ekle; ana sayfada son 7 gün kala uyarı çıkar.</p>'}</div></section>
-    ${done.length ? `<section><h2 class="sec">Tamamlananlar</h2><div class="list">${done.map(row).join('')}</div></section>` : ''}
-    <p class="hint">📅 ile süreyi iPhone Takvimi'ne alarmlı ekleyebilirsin (bir gün önce ve aynı gün 09:00). Takvim kaydında mükellef unvanı değil, dosya kodu yazar.</p>`;
+  return `<div class="sec-row"><h2 class="sec">Süreler</h2><button class="btn link sm" data-act="newGorev" data-mid="${m.id}">+ Ekle</button></div>
+    ${open.length ? `<div class="list">${open.map(row).join('')}</div>` : '<p class="footnote">Açık süre yok. İbraz, ek süre, cevap süresi gibi tarihleri ekleyebilirsin; son 7 gün kala ana sayfada uyarı çıkar.</p>'}
+    ${done.length ? `<details class="done"><summary>${done.length} tamamlanan</summary><div class="list">${done.map(row).join('')}</div></details>` : ''}`;
 }
 function gorevSheet(mid, g = null) {
   const v = g || {};
@@ -1148,7 +1027,7 @@ const ACT = {
   toggleDurum: async d => { const m = S.items.get(d.id); await save({ ...m, durum: isAktif(m) ? 'kapandi' : 'aktif' }); render(); },
   delM: async d => {
     const m = S.items.get(d.id);
-    if (!confirm(`“${m.unvan}” dosyası ve içindeki tüm notlar, ses kayıtları, belgeler ve süreler silinsin mi? Bu işlem geri alınamaz.`)) return;
+    if (!confirm(`“${m.unvan}” dosyası ve içindeki tüm notlar, ses kayıtları ve süreler silinsin mi? Bu işlem geri alınamaz.`)) return;
     const kids = [...S.items.values()].filter(i => i.mid === m.id);
     const fileIds = kids.flatMap(i => i.kind === 'belge' ? [i.fileId] : i.kind === 'kayit' ? (i.sesler || []).map(s => s.fileId) : []);
     await removeItems([m.id, ...kids.map(i => i.id)], fileIds);
@@ -1175,15 +1054,6 @@ const ACT = {
     render();
   },
   play: async (d, el) => playInto(el.parentElement, await loadFile(d.file, d.mime)),
-  newBelge: d => belgeSheet(d.mid),
-  openBelge: d => openBelge(d.id),
-  shareBelge: () => S.viewerFile && shareOrDownload(S.viewerFile),
-  delBelge: async d => {
-    if (!confirm('Belge silinsin mi?')) return;
-    const b = S.items.get(d.id);
-    await removeItems([b.id], [b.fileId]);
-    closeSheet(); render();
-  },
   newGorev: d => gorevSheet(d.mid),
   editGorev: d => { const g = S.items.get(d.id); gorevSheet(g.mid, g); },
   toggleGorev: async d => { const g = S.items.get(d.id); await save({ ...g, bitti: !g.bitti }); render(); },

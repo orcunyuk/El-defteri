@@ -271,3 +271,35 @@ a.row:active, button.row:active, label.row:active { background: var(--cell-press
 .lock-foot { margin-top: 18px; }
 .lock-foot .btn { padding: 0 4px; min-height: 0; font-size: 13px; }
 .lock-input.test { width: 100%; margin-top: 10px; background: var(--cell); border-radius: 10px; }
+
+/* ---------- sade dosya ekranı ---------- */
+.detail { padding-top: 8px; }
+.info-grid, .tel-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.ibox { background: var(--cell); border-radius: 14px; padding: 9px 12px 10px; min-width: 0; }
+.ibox.full { grid-column: 1 / -1; }
+.ibox > span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .02em; color: var(--muted); }
+.ibox > b { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; margin-top: 2px; line-height: 1.25; overflow-wrap: anywhere; }
+.ibox.full > b { font-size: 17px; }
+.tbox { position: relative; background: var(--cell); border-radius: 14px; min-width: 0; }
+.tbox-main { display: flex; flex-direction: column; width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; padding: 9px 11px 10px; cursor: pointer; border-radius: 14px; }
+.tbox-main:active { background: var(--cell-press); }
+.tbox-main b { font-size: 14px; font-weight: 600; line-height: 1.25; padding-right: 34px; overflow-wrap: anywhere; }
+.tbox-main span { font-size: 12px; color: var(--muted); line-height: 1.25; padding-right: 34px; margin-top: 1px; overflow-wrap: anywhere; }
+.tbox-main em { font-style: normal; font-size: 16px; font-weight: 600; letter-spacing: .01em; white-space: nowrap; margin-top: 5px; }
+.tbox-main em.mail { font-size: 13px; font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+.tbox-main em.none { font-size: 13px; font-weight: 400; color: var(--muted); }
+.tbox .call { position: absolute; top: 9px; right: 9px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--green); color: #fff; }
+.tbox .call.mail { background: var(--accent); }
+.tbox .call svg { width: 15px; height: 15px; }
+.row-title.wrap { white-space: normal; }
+details.done { margin-top: 8px; }
+details.done summary { color: var(--muted); font-size: 14px; margin: 0 16px 8px; cursor: pointer; }
+.list.end { margin-top: 28px; }
+.fab.wide { width: auto; height: 50px; padding: 0 20px 0 16px; border-radius: 25px; display: flex; gap: 6px; font-size: 16px; font-weight: 600; }
+.fab.wide svg { width: 22px; height: 22px; }
+details.more { margin-top: 10px; }
+details.more summary { list-style: none; background: var(--cell); border-radius: 14px; padding: 11px 14px; color: var(--accent); font-size: 15px; cursor: pointer; display: flex; justify-content: space-between; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more summary::after { content: "›"; color: var(--chev); font-size: 20px; line-height: 1; transition: transform .2s; }
+details.more[open] summary::after { transform: rotate(90deg); }
+details.more .info-grid { margin-top: 10px; }
