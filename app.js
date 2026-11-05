@@ -49,6 +49,26 @@ const fmtSize = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0
 const telHref = t => String(t).replace(/[^\d+]/g, '');
 const coll = new Intl.Collator('tr');
 const fold = s => String(s || '').toLocaleLowerCase('tr').replace(/\s+/g, ' ').trim();
+// Unvanı kısaltır: ilk iki kelime + şirket türü ("Örnek Gıda Tarım ... Ltd. Şti." → "Örnek Gıda Ltd. Şti.")
+const TR_FOLD = s => s.toLocaleLowerCase('tr').replace(/[çğıöşüâî]/g, c => ({ ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', â: 'a', î: 'i' }[c]));
+const STOP = /^(san|sanayi|sanayii|tic|ticaret|ve|ith|ithalat|ihr|ihracat|ltd|limited|sti|sirketi|as|a\.s|anonim|koll|kollektif|kom|komandit|koop|kooperatifi?|ic|dis|ltd\.?sti)\.?$/;
+function kisaAd(m) {
+  if (m.kisaAd) return m.kisaAd;
+  const u = String(m.unvan || '').replace(/\s+/g, ' ').trim();
+  const f = TR_FOLD(u);
+  const tur = /\b(limited|ltd)\b/.test(f) ? 'Ltd. Şti.' : /\b(anonim|a\.?\s?s)\b\.?/.test(f) ? 'A.Ş.' : /kollektif|koll\b/.test(f) ? 'Koll. Şti.'
+    : /komandit|kom\.\s*sti/.test(f) ? 'Kom. Şti.' : /kooperatif/.test(f) ? 'Koop.' : '';
+  if (!tur) return u; // şahıs ya da tanınmayan tür: olduğu gibi
+  const words = [];
+  for (const w of u.split(' ')) {
+    if (STOP.test(TR_FOLD(w).replace(/[.,]/g, m => m === '.' ? '.' : ''))) break;
+    words.push(w.replace(/[,]+$/, ''));
+    if (words.length === 2) break;
+  }
+  if (!words.length) return u;
+  const out = words.join(' ') + ' ' + tur;
+  return u === u.toLocaleUpperCase('tr') ? out.toLocaleUpperCase('tr') : out;
+}
 const isStandalone = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
 function trackURL(blob) { const u = URL.createObjectURL(blob); S.urls.add(u); return u; }
 
@@ -482,14 +502,15 @@ function acikSureler() {
   const ms = all('mukellef').filter(isAktif);
   const ids = new Set(ms.map(m => m.id));
   return [
-    ...ms.filter(m => m.bitisTarihi).map(m => ({ d: m.bitisTarihi, href: `#/m/${m.id}/sureler`, title: 'İnceleme bitiş süresi', sub: `${m.unvan} · ${fmtD(m.bitisTarihi)}`, m })),
-    ...all('gorev').filter(g => !g.bitti && ids.has(g.mid) && g.tarih).map(g => ({ d: g.tarih, href: `#/m/${g.mid}/sureler`, title: g.baslik, sub: `${S.items.get(g.mid)?.unvan || ''} · ${fmtD(g.tarih)}`, g })),
+    ...ms.filter(m => m.bitisTarihi).map(m => ({ d: m.bitisTarihi, href: `#/m/${m.id}/sureler`, title: 'İnceleme bitiş süresi', sub: `${kisaAd(m)} · ${fmtD(m.bitisTarihi)}`, m })),
+    ...all('gorev').filter(g => !g.bitti && ids.has(g.mid) && g.tarih).map(g => ({ d: g.tarih, href: `#/m/${g.mid}/sureler`, title: g.baslik, sub: `${S.items.get(g.mid) ? kisaAd(S.items.get(g.mid)) : ''} · ${fmtD(g.tarih)}`, g })),
   ].sort((a, b) => a.d.localeCompare(b.d));
 }
 function sureBox(a) {
   const n = daysUntil(a.d);
   const tone = n < 0 ? 'red' : n <= 3 ? 'orange' : 'green';
-  const unvan = a.m?.unvan || S.items.get(a.g?.mid)?.unvan || '';
+  const mm = a.m || S.items.get(a.g?.mid);
+  const unvan = mm ? kisaAd(mm) : '';
   return `<a class="sbox ${tone}" href="${a.href}">
     <span class="sbox-badge">${relDays(n)}</span>
     <b>${esc(a.title)}</b>
@@ -528,7 +549,7 @@ function drawMList() {
     const og = byM('gorev', m.id).filter(g => !g.bitti).length;
     const tur = m.incelemeTuru === 'sinirli' ? 'Sınırlı' : m.incelemeTuru === 'tam' ? 'Tam' : '';
     return `<a class="dbox" href="#/m/${m.id}">
-      <b>${esc(m.unvan)}</b>
+      <b>${esc(kisaAd(m))}</b>
       <dl>
         <dt>${m.vkn || !m.tckn ? 'VKN' : 'TCKN'}</dt><dd>${esc(m.vkn || m.tckn || '—')}</dd>
         <dt>Yıl</dt><dd>${esc([m.donem, tur].filter(Boolean).join(' · ') || '—')}</dd>
@@ -557,7 +578,7 @@ function renderDetail(id) {
     ? `<div class="ibox${full ? ' full' : ''}"><span>${esc(l)}</span><b>${v ? (raw ? v : esc(v)) : '—'}</b></div>` : '';
   const inc = [m.incelemeTuru === 'sinirli' ? 'Sınırlı' : m.incelemeTuru === 'tam' ? 'Tam' : '', m.vergiTuru].filter(Boolean).join(' · ');
   const kisiler = m.kisiler || [];
-  app.innerHTML = header(m.unvan, { back: '#/', backLabel: 'Dosyalar', large: false, right: `<button class="nav-btn" data-act="editM" data-id="${id}">Düzenle</button>` }) +
+  app.innerHTML = header(kisaAd(m), { back: '#/', backLabel: 'Dosyalar', large: false, right: `<button class="nav-btn" data-act="editM" data-id="${id}">Düzenle</button>` }) +
     `<div class="page detail">
       <div class="info-grid">
         ${box('Adı / Unvanı', m.unvan, { full: true, empty: true })}
@@ -661,6 +682,8 @@ function mukellefSheet(m = null) {
   const form = openSheet(m ? 'Dosyayı düzenle' : 'Yeni dosya', `
     ${m ? '' : '<button type="button" class="btn block" data-act="paket">📦 Hazır paketi içe aktar</button><p class="hint center">ya da bilgileri elle gir</p>'}
     ${field('Adı / Unvanı', 'unvan', v.unvan, { required: true })}
+    ${field('Kısa ad (isteğe bağlı)', 'kisaAd', v.kisaAd, { placeholder: 'Boş bırakırsan otomatik kısaltılır' })}
+    <p class="hint" id="kisaOnizle"></p>
     <div class="row2">${field('VKN', 'vkn', v.vkn, { inputmode: 'numeric' })}${field('TCKN', 'tckn', v.tckn, { inputmode: 'numeric' })}</div>
     <div class="row2">${field('İnceleme yılı', 'donem', v.donem, { placeholder: 'ör. 2024' })}${field('Vergi dairesi', 'vergiDairesi', v.vergiDairesi)}</div>
     <div class="row2">${select('İnceleme türü', 'incelemeTuru', v.incelemeTuru, Object.entries(INC_TUR))}${field('Vergi türü', 'vergiTuru', v.vergiTuru, { placeholder: 'ör. KDV' })}</div>
@@ -672,11 +695,13 @@ function mukellefSheet(m = null) {
     ${m ? '' : '<p class="hint">Telefonları dosyayı kaydettikten sonra “Telefonlar → + Ekle” ile eklersin.</p>'}`,
   { onSubmit: async (f, fd) => {
     const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
-    for (const k of ['unvan', 'vkn', 'tckn', 'donem', 'vergiDairesi', 'incelemeTuru', 'vergiTuru', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'faaliyet']) item[k] = String(fd.get(k) ?? '').trim();
+    for (const k of ['unvan', 'kisaAd', 'vkn', 'tckn', 'donem', 'vergiDairesi', 'incelemeTuru', 'vergiTuru', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'faaliyet']) item[k] = String(fd.get(k) ?? '').trim();
     await save(item);
     if (!m) location.hash = `#/m/${item.id}`;
   } });
   const e = form.elements;
+  const onizle = () => { const k = kisaAd({ unvan: e.unvan.value, kisaAd: e.kisaAd.value.trim() }); $('#kisaOnizle').textContent = k && k !== e.unvan.value.trim() ? 'Listede görünecek: ' + k : ''; };
+  e.unvan.addEventListener('input', onizle); e.kisaAd.addEventListener('input', onizle); onizle();
   const auto = () => {
     if (!e.baslamaTarihi.value || (e.bitisTarihi.value && !e.bitisTarihi.dataset.auto)) return;
     e.bitisTarihi.value = addMonths(e.baslamaTarihi.value, e.incelemeTuru.value === 'sinirli' ? 6 : 12);
