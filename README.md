@@ -3,7 +3,7 @@
 Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
 
 - **Belgeden doldurma:** İş emri, beyanname gibi belgeler (PDF, taranmış PDF ya da fotoğraf) seçildiğinde unvan, VKN/TCKN, vergi dairesi, dönem, inceleme türü, iş emri sayısı ve tarihi, adres ile mükellef ve SMMM iletişim bilgileri otomatik doldurulur. Okuma tamamen cihazda yapılır: metin içeren PDF'ler PDF.js ile, taranmış belgeler Türkçe Tesseract OCR ile okunur. Bulunan alanlar fosforlu işaretlenir, kayıttan önce kontrol edilmelidir.
-- **Görünüm:** Giriş ekranı kara kaplı defter kapağıdır. Sayfa düzeni (çizgili, kareli, noktalı, düz) ve kağıt rengi (sarı, krem, beyaz) Ayarlar'dan seçilir.
+- **Görünüm:** iPhone (iOS) tasarımı. Büyük başlıklar, gruplu listeler ve alt sekme çubuğu var (Dosyalar · Süreler · Ayarlar). Açık, koyu ya da sistem teması Ayarlar → Görünüm'den seçilir.
 - **Mükellef dosyaları:** Unvan, VKN, vergi dairesi, inceleme türü ve dönemi, iş emri bilgileri, başlama ve bitiş süresi (VUK 140'a göre öneri), adres ve kişiler (tek dokunuşla arama ya da e-posta).
 - **Görüşme günlüğü:** Tarih, tür, görüşülen kişi, konu, yazılı not ve sesli not. Not alırken isteğe bağlı takip süresi de eklenebilir. Uygulamadan bir kişi arandığında, uygulamaya dönünce “görüşmeni not al” hatırlatması çıkar.
 - **Belgeler:** İş emri, beyanname, tutanak ve yazışmalar PDF ya da fotoğraf olarak eklenir, uygulama içinde görüntülenir.

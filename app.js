@@ -3,13 +3,16 @@ import * as cr from './crypto.js';
 import { extractText, parse } from './extract.js';
 
 const $ = (s, el = document) => el.querySelector(s);
-function defaultSettings() { return { autolock: 5, paper: 'cizgili', paperColor: 'sari' }; }
-const PAPERS = [['cizgili', 'Çizgili'], ['kareli', 'Kareli'], ['noktali', 'Noktalı'], ['duz', 'Düz']];
-const PAPER_COLORS = [['sari', 'Sarı'], ['krem', 'Krem'], ['beyaz', 'Beyaz']];
+function defaultSettings() { return { autolock: 5, theme: 'sistem' }; }
+const THEMES = [['sistem', 'Sistem'], ['acik', 'Açık'], ['koyu', 'Koyu']];
+const darkMQ = matchMedia('(prefers-color-scheme: dark)');
 function applyTheme() {
-  document.documentElement.dataset.paper = S.settings.paper;
-  document.documentElement.dataset.paperColor = S.settings.paperColor;
+  const t = S.settings.theme || 'sistem';
+  const dark = t === 'koyu' || (t === 'sistem' && darkMQ.matches);
+  document.documentElement.dataset.theme = dark ? 'koyu' : 'acik';
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#000000' : '#f2f2f7');
 }
+darkMQ.addEventListener?.('change', () => applyTheme());
 const app = $('#app');
 const S = {
   key: null, vault: null, items: new Map(), settings: defaultSettings(), lastBackup: null,
@@ -61,7 +64,18 @@ const I = {
   cal: svg('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>'),
   doc: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>'),
   play: svg('<path d="M7 4l13 8-13 8z"/>'),
+  clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  chev: '<svg class="chev" viewBox="0 0 8 14" width="8" height="14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  backChev: '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><path d="M10 2 2 10l8 8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  folderFill: '<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2.2h7A2.5 2.5 0 0 1 21 8.7v9.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z"/></svg>',
+  clockFill: '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 6.5V12l3.5 2.2" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  gearFill: '<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8.2 4.6.1-1.1-.1-1.1 2-1.6-2-3.4-2.4 1a8 8 0 0 0-1.9-1.1L15.5 3h-4l-.4 2.7a8 8 0 0 0-1.9 1.1l-2.4-1-2 3.4 2 1.6-.1 1.2.1 1.1-2 1.6 2 3.4 2.4-1c.6.5 1.2.8 1.9 1.1l.4 2.8h4l.4-2.7c.7-.3 1.3-.7 1.9-1.1l2.4 1 2-3.4z"/></svg>',
+  search: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
 };
+const AV_COLORS = ['#ff9500', '#34c759', '#5ac8fa', '#af52de', '#ff2d55', '#5856d6', '#ffcc00', '#007aff', '#30b0c7', '#a2845e'];
+const initials = s => String(s || '?').split(/\s+/).filter(w => /^[A-Za-zÇĞİÖŞÜçğıöşü]/.test(w)).slice(0, 2).map(w => w[0].toLocaleUpperCase('tr')).join('') || '?';
+const avIndex = s => [...String(s || '')].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % AV_COLORS.length;
+const avatar = s => `<span class="avatar av${avIndex(s)}">${esc(initials(s))}</span>`;
 
 const TURLER = [['telefon', '📞 Telefon'], ['yuzyuze', '🤝 Yüz yüze'], ['yazi', '📄 Resmi yazı'], ['eposta', '✉️ E-posta'], ['diger', '📝 Diğer / not']];
 const TUR_LABEL = Object.fromEntries(TURLER);
@@ -102,8 +116,16 @@ async function loadItems() {
 }
 
 /* ---------- arayüz parçaları ---------- */
-const header = (title, left = '', right = '') =>
-  `<header class="bar"><div class="bar-side">${left}</div><h1>${esc(title)}</h1><div class="bar-side right">${right}</div></header>`;
+// iOS gezinme çubuğu: küçük başlık kaydırınca görünür, büyük başlık içerikte
+const header = (title, { back, backLabel = 'Geri', left = '', right = '', large = true } = {}) =>
+  `<header class="nav${large ? '' : ' compact'}"><div class="nav-bar">
+     <div class="nav-l">${back ? `<a class="nav-back" href="${back}">${I.backChev}<span>${esc(backLabel)}</span></a>` : left}</div>
+     <div class="nav-title">${esc(title)}</div>
+     <div class="nav-r">${right}</div></div></header>
+   ${large ? `<h1 class="large-title">${esc(title)}</h1>` : ''}`;
+const tabbar = on => `<nav class="tabbar">${[['dosyalar', '#/', I.folderFill, 'Dosyalar'], ['sureler', '#/sureler', I.clockFill, 'Süreler'], ['ayarlar', '#/ayarlar', I.gearFill, 'Ayarlar']]
+  .map(([k, h, ic, l]) => `<a href="${h}" class="${k === on ? 'on' : ''}">${ic}<span>${l}</span></a>`).join('')}</nav>`;
+addEventListener('scroll', () => document.body.classList.toggle('scrolled', scrollY > 36), { passive: true });
 const attr = (k, v) => (v ? ` ${k}="${esc(v)}"` : '');
 const field = (label, name, value = '', o = {}) =>
   `<label class="fld"><span>${esc(label)}</span><input name="${name}" type="${o.type || 'text'}" value="${esc(value)}"${o.required ? ' required' : ''}${attr('placeholder', o.placeholder)}${attr('inputmode', o.inputmode)}${attr('autocomplete', o.autocomplete)}${o.extra ? ' ' + o.extra : ''}></label>`;
@@ -173,41 +195,40 @@ function render() {
   const p = (location.hash.slice(1) || '/').split('/').filter(Boolean);
   if (p[0] === 'm' && S.items.get(p[1])) return renderDetail(p[1], p[2] || 'ozet');
   if (p[0] === 'ayarlar') return renderSettings();
+  if (p[0] === 'sureler') return renderSureler();
   renderHome();
 }
-window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); document.body.classList.remove('scrolled'); });
 
 /* ---------- kilit ---------- */
 function renderLock() {
   const has = !!S.vault;
-  app.innerHTML = `<div class="cover">
-    <div class="cover-spine"></div>
-    <div class="cover-band"></div>
-    <div class="cover-inner">
-      <h1 class="cover-title">Notebook</h1>
-      <div class="cover-rule"></div>
-      <form id="lockForm" class="cover-form">
-        ${has ? '' : `<p class="cover-note">Notlar yalnızca bu telefonda, belirleyeceğin şifreyle şifreli saklanır. Şifreyi unutursan veriler kurtarılamaz.</p>`}
-        ${userField}
-        <input type="password" name="p1" autocomplete="${has ? 'current-password' : 'new-password'}" placeholder="${has ? 'Şifre' : 'Yeni şifre'}" required minlength="${has ? 1 : 6}" aria-label="Şifre">
-        ${has ? '' : '<input type="password" name="p2" autocomplete="new-password" placeholder="Şifre (tekrar)" required minlength="6" aria-label="Şifre tekrar">'}
-        <button class="cover-btn" type="submit">${has ? 'Aç' : 'Defteri oluştur'}</button>
-        <p class="err" id="lockErr" role="alert"></p>
-      </form>
-      <button class="cover-link" data-act="importBackup">Yedekten geri yükle</button>
-    </div>
+  app.innerHTML = `<div class="lock">
+    <img src="icons/icon-192.png" class="lock-icon" alt="">
+    <h1>El Defteri</h1>
+    <p class="muted">${has ? 'Devam etmek için şifreni gir.' : 'Veriler yalnızca bu cihazda, belirleyeceğin şifreyle şifreli saklanır.'}</p>
+    <form id="lockForm" class="lock-form">
+      ${userField}
+      <div class="list">
+        <input class="lock-input" type="password" name="p1" autocomplete="${has ? 'current-password' : 'new-password'}" placeholder="${has ? 'Şifre' : 'Yeni şifre (en az 6 karakter)'}" required minlength="${has ? 1 : 6}" aria-label="Şifre">
+        ${has ? '' : '<input class="lock-input" type="password" name="p2" autocomplete="new-password" placeholder="Şifre (tekrar)" required minlength="6" aria-label="Şifre tekrar">'}
+      </div>
+      <button class="btn primary block lg" type="submit">${has ? 'Aç' : 'Başla'}</button>
+      <p class="err" id="lockErr" role="alert"></p>
+      ${has ? '' : '<p class="hint center">Şifreyi unutursan veriler kurtarılamaz.</p>'}
+    </form>
+    <button class="btn link" data-act="importBackup">Yedekten geri yükle</button>
   </div>`;
   const form = $('#lockForm');
   const err = $('#lockErr');
   if (!/iPhone|iPad|Android/.test(navigator.userAgent)) form.p1.focus();
   form.onsubmit = async e => {
     e.preventDefault();
-    const btn = form.querySelector('button');
+    const btn = form.querySelector('[type=submit]');
     const p1 = form.p1.value;
     err.textContent = '';
     if (!has && p1 !== form.p2.value) { err.textContent = 'Şifreler aynı değil.'; return; }
     btn.disabled = true; btn.textContent = has ? 'Açılıyor…' : 'Hazırlanıyor…';
-    let opened = false;
     try {
       if (has) {
         const key = await cr.openVault(p1, S.vault);
@@ -221,27 +242,16 @@ function renderLock() {
         navigator.storage?.persist?.();
       }
       S.lastActive = Date.now();
-      opened = true;
-      openCover();
+      document.activeElement?.blur?.();
+      render();
       offerCallNote();
     } catch (ex) {
       console.error(ex);
       err.textContent = 'Hata: ' + ex.message;
     } finally {
-      if (!opened) { btn.disabled = false; btn.textContent = has ? 'Aç' : 'Defteri oluştur'; }
+      btn.disabled = false; btn.textContent = has ? 'Aç' : 'Başla';
     }
   };
-}
-// Kapak, sayfanın üstünden sola doğru açılır
-function openCover() {
-  const cover = app.querySelector('.cover');
-  document.activeElement?.blur?.();
-  if (!cover || matchMedia('(prefers-reduced-motion: reduce)').matches) return render();
-  document.body.append(cover);
-  cover.classList.add('floating');
-  render();
-  requestAnimationFrame(() => requestAnimationFrame(() => cover.classList.add('opening')));
-  setTimeout(() => cover.remove(), 900);
 }
 function lock() {
   closeSheet();
@@ -265,39 +275,37 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- ana sayfa ---------- */
-function alertRow(href, title, m, date) {
-  return `<a class="row" href="${href}"><div class="row-main"><div class="row-title">${esc(title)}</div><div class="row-sub">${esc(m?.kod ? m.kod + ' · ' : '')}${esc(m?.unvan)} · ${fmtD(date)}</div></div>${badge(date)}</a>`;
+function sureRow(href, title, sub, date) {
+  const n = daysUntil(date);
+  const tone = n < 0 ? 'red' : n <= 3 ? 'orange' : 'green';  // rozet renkleriyle aynı
+  return `<a class="row" href="${href}"><span class="row-ico ${tone}">${I.clock}</span><div class="row-main"><div class="row-title">${esc(title)}</div><div class="row-sub">${esc(sub)}</div></div>${badge(date)}</a>`;
+}
+// Aktif dosyalardaki açık süreler ve inceleme bitiş süreleri
+function acikSureler() {
+  const ms = all('mukellef').filter(isAktif);
+  const ids = new Set(ms.map(m => m.id));
+  return [
+    ...ms.filter(m => m.bitisTarihi).map(m => ({ d: m.bitisTarihi, href: `#/m/${m.id}/sureler`, title: 'İnceleme bitiş süresi', sub: `${m.unvan} · ${fmtD(m.bitisTarihi)}`, m })),
+    ...all('gorev').filter(g => !g.bitti && ids.has(g.mid) && g.tarih).map(g => ({ d: g.tarih, href: `#/m/${g.mid}/sureler`, title: g.baslik, sub: `${S.items.get(g.mid)?.unvan || ''} · ${fmtD(g.tarih)}`, g })),
+  ].sort((a, b) => a.d.localeCompare(b.d));
 }
 function renderHome() {
-  const ms = all('mukellef');
-  const aktif = new Set(ms.filter(isAktif).map(m => m.id));
-  const gAlerts = all('gorev').filter(g => !g.bitti && aktif.has(g.mid) && g.tarih && daysUntil(g.tarih) <= 7);
-  const bAlerts = ms.filter(m => aktif.has(m.id) && m.bitisTarihi && daysUntil(m.bitisTarihi) <= 30);
-  const alerts = [
-    ...bAlerts.map(m => ({ d: m.bitisTarihi, h: alertRow(`#/m/${m.id}/sureler`, 'İnceleme bitiş süresi', m, m.bitisTarihi) })),
-    ...gAlerts.map(g => ({ d: g.tarih, h: alertRow(`#/m/${g.mid}/sureler`, g.baslik, S.items.get(g.mid), g.tarih) })),
-  ].sort((a, b) => a.d.localeCompare(b.d));
-
+  const alerts = acikSureler().filter(a => daysUntil(a.d) <= (a.g ? 7 : 30));
   const banners = [];
   if (!isStandalone()) banners.push(`<div class="banner warn"><b>Ana ekrana ekle:</b> Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile yükleyip uygulamayı oradan aç. Safari sekmesinde kalan veriler, siteye bir süre girilmezse iOS tarafından silinebilir.</div>`);
   if (S.items.size && (!S.lastBackup || Date.now() - S.lastBackup > 14 * 864e5)) {
-    banners.push(`<a class="banner" href="#/ayarlar"><b>Yedek al:</b> ${S.lastBackup ? 'Son yedek ' + fmtTs(S.lastBackup) + '.' : 'Henüz yedek almadın.'} Telefon kaybolursa veriler yedek olmadan kurtarılamaz. ›</a>`);
+    banners.push(`<a class="banner" href="#/ayarlar"><b>Yedek al:</b> ${S.lastBackup ? 'Son yedek ' + fmtTs(S.lastBackup) + '.' : 'Henüz yedek almadın.'} Telefon kaybolursa veriler yedek olmadan kurtarılamaz.</a>`);
   }
   const seg = (v, l) => `<button class="${S.filter === v ? 'on' : ''}" data-act="filter" data-v="${v}">${l}</button>`;
-
-  app.innerHTML = header('El Defteri',
-    `<button class="icon-btn" data-act="lock" aria-label="Kilitle">${I.lock}</button>`,
-    `<a class="icon-btn" href="#/ayarlar" aria-label="Ayarlar">${I.gear}</a>`) +
+  app.innerHTML = header('Dosyalar', { left: `<button class="nav-btn" data-act="lock">Kilitle</button>`, right: `<button class="nav-btn icon" data-act="newM" aria-label="Yeni dosya">${I.plus}</button>` }) +
     `<div class="page">
+      <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan, dosya kodu veya VKN ara" value="${esc(S.q)}"></label>
       ${banners.join('')}
-      ${alerts.length ? `<section><h2 class="sec">Yaklaşan süreler</h2><div class="list">${alerts.map(a => a.h).join('')}</div></section>` : ''}
-      <section>
-        <div class="sec-row"><h2 class="sec">Dosyalar</h2><div class="seg">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
-        <input class="search" id="q" type="search" placeholder="Unvan, dosya kodu veya VKN ara" value="${esc(S.q)}">
-        <div id="mlist" class="list"></div>
-      </section>
+      ${alerts.length ? `<h2 class="sec">Yaklaşan süreler</h2><div class="list">${alerts.map(a => sureRow(a.href, a.title, a.sub, a.d)).join('')}</div>` : ''}
+      <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
+      <div id="mlist" class="list inset-avatar"></div>
     </div>
-    <button class="fab" data-act="newM">${I.plus}<span>Yeni dosya</span></button>`;
+    <button class="fab" data-act="newM" aria-label="Yeni dosya">${I.plus}</button>${tabbar('dosyalar')}`;
   $('#q').oninput = e => { S.q = e.target.value; drawMList(); };
   drawMList();
 }
@@ -310,67 +318,75 @@ function drawMList() {
   $('#mlist').innerHTML = list.map(m => {
     const lc = lastContact(m.id);
     const og = byM('gorev', m.id).filter(g => !g.bitti).length;
-    return `<a class="row" href="#/m/${m.id}">
+    return `<a class="row" href="#/m/${m.id}">${avatar(m.unvan)}
       <div class="row-main">
         <div class="row-title">${esc(m.unvan)}</div>
-        <div class="row-sub">${esc([m.kod, m.vkn ? 'VKN ' + m.vkn : m.tckn && 'TCKN ' + m.tckn, m.donem].filter(Boolean).join(' · '))}</div>
-        <div class="row-sub">${lc ? 'Son temas: ' + relPast(lc) : 'Henüz görüşme kaydı yok'}${og ? ` · ${og} açık süre` : ''}</div>
-      </div><span class="chev">›</span></a>`;
-  }).join('') || `<p class="empty">${q ? 'Eşleşen dosya yok.' : S.filter === 'aktif' ? 'Henüz dosya yok. Sağ alttaki <b>Yeni dosya</b> ile başla.' : 'Kapanan dosya yok.'}</p>`;
+        <div class="row-sub">${esc([m.kod, m.vkn ? 'VKN ' + m.vkn : m.tckn && 'TCKN ' + m.tckn, m.donem, m.incelemeTuru && (m.incelemeTuru === 'sinirli' ? 'Sınırlı' : 'Tam')].filter(Boolean).join(' · '))}</div>
+      </div>
+      <span class="row-detail">${lc ? relPast(lc) : og ? og + ' süre' : ''}</span>${I.chev}</a>`;
+  }).join('') || `<p class="empty">${q ? 'Eşleşen dosya yok.' : S.filter === 'aktif' ? 'Henüz dosya yok. <b>+</b> ile yeni dosya aç.' : 'Kapanan dosya yok.'}</p>`;
+}
+
+/* ---------- tüm süreler ---------- */
+function renderSureler() {
+  const list = acikSureler();
+  const groups = [['Süresi geçenler', a => daysUntil(a.d) < 0], ['Bu hafta', a => daysUntil(a.d) >= 0 && daysUntil(a.d) <= 7], ['Bu ay', a => daysUntil(a.d) > 7 && daysUntil(a.d) <= 31], ['Daha sonra', a => daysUntil(a.d) > 31]];
+  app.innerHTML = header('Süreler') + `<div class="page">
+    ${groups.map(([t, f]) => { const g = list.filter(f); return g.length ? `<h2 class="sec">${t}</h2><div class="list">${g.map(a => sureRow(a.href, a.title, a.sub, a.d)).join('')}</div>` : ''; }).join('')
+      || '<p class="empty">Açık süre yok. Dosyalarda <b>Süreler</b> sekmesinden ibraz, ek süre, cevap süreleri gibi tarihleri ekleyebilirsin.</p>'}
+    <p class="footnote">Aktif dosyalardaki açık görevler ve inceleme bitiş süreleri listelenir.</p>
+  </div>${tabbar('sureler')}`;
 }
 
 /* ---------- mükellef dosyası ---------- */
 function renderDetail(id, tab) {
   const m = S.items.get(id);
-  const nK = byM('kayit', id).length, nB = byM('belge', id).length, nG = byM('gorev', id).filter(g => !g.bitti).length;
-  const tabs = [['ozet', 'Özet'], ['kayitlar', `Görüşmeler${nK ? ` (${nK})` : ''}`], ['belgeler', `Belgeler${nB ? ` (${nB})` : ''}`], ['sureler', `Süreler${nG ? ` (${nG})` : ''}`]];
+  const tabs = [['ozet', 'Özet'], ['kayitlar', 'Görüşmeler'], ['belgeler', 'Belgeler'], ['sureler', 'Süreler']];
   const body = { ozet: ozetHTML, kayitlar: kayitlarHTML, belgeler: belgelerHTML, sureler: surelerHTML }[tab]?.(m) ?? ozetHTML(m);
   const fab = {
-    belgeler: `<button class="fab" data-act="newBelge" data-mid="${id}">${I.plus}<span>Belge ekle</span></button>`,
-    sureler: `<button class="fab" data-act="newGorev" data-mid="${id}">${I.plus}<span>Süre / görev</span></button>`,
-  }[tab] ?? `<button class="fab" data-act="newKayit" data-mid="${id}">${I.plus}<span>Görüşme notu</span></button>`;
-  app.innerHTML = header(m.unvan,
-    `<a class="icon-btn" href="#/" aria-label="Geri">${I.back}</a>`,
-    `<button class="icon-btn" data-act="editM" data-id="${id}" aria-label="Düzenle">${I.edit}</button>`) +
-    `<nav class="tabs">${tabs.map(([k, l]) => `<a href="#/m/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</nav>
-     <div class="page">${body}</div>${fab}`;
+    belgeler: `<button class="fab" data-act="newBelge" data-mid="${id}" aria-label="Belge ekle">${I.plus}</button>`,
+    sureler: `<button class="fab" data-act="newGorev" data-mid="${id}" aria-label="Süre ekle">${I.plus}</button>`,
+  }[tab] ?? `<button class="fab" data-act="newKayit" data-mid="${id}" aria-label="Görüşme notu ekle">${I.plus}</button>`;
+  app.innerHTML = header(m.unvan, { back: '#/', backLabel: 'Dosyalar', right: `<button class="nav-btn" data-act="editM" data-id="${id}">Düzenle</button>` }) +
+    `<div class="seg-wrap"><nav class="seg">${tabs.map(([k, l]) => `<a href="#/m/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</nav></div>
+     <div class="page">${body}</div>${fab}${tabbar('dosyalar')}`;
 }
 
+// Kısa değerler sağda, uzunlar etiketin altında (iOS Kişiler uygulaması gibi)
+const kv = (k, v, raw) => { if (!v) return ''; const html = raw ? v : esc(v); const long = String(v).replace(/<[^>]+>/g, '').length > 26;
+  return `<div class="kv${long ? ' stack' : ''}"><span>${esc(k)}</span><b>${html}</b></div>`; };
 function ozetHTML(m) {
-  const rows = [
-    ['Dosya kodu', esc(m.kod)], ['VKN', esc(m.vkn)], ['TCKN', esc(m.tckn)], ['Vergi dairesi', esc(m.vergiDairesi)],
-    ['Faaliyet', esc(m.faaliyet)],
-    ['İnceleme', esc([INC_TUR[m.incelemeTuru], m.vergiTuru].filter(Boolean).join(' · '))], ['Dönem', esc(m.donem)],
-    ['Gerekçe', esc(m.gerekce)],
-    ['İş emri', esc([m.isEmriNo, fmtD(m.isEmriTarihi)].filter(Boolean).join(' · '))],
-    ['Başlama', esc(fmtD(m.baslamaTarihi))],
-    ['Bitiş süresi', m.bitisTarihi ? `${esc(fmtD(m.bitisTarihi))} ${isAktif(m) ? badge(m.bitisTarihi) : ''}` : ''],
-    ['Adres', esc(m.adres)], ['Durum', isAktif(m) ? 'Aktif' : 'Kapandı'],
-  ].filter(r => r[1]);
   const kisiler = m.kisiler || [];
   const lc = lastContact(m.id);
+  const nK = byM('kayit', m.id).length, nB = byM('belge', m.id).length, nG = byM('gorev', m.id).filter(g => !g.bitti).length;
   return `
-    <section class="card"><dl class="info">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></section>
-    <section>
-      <div class="sec-row"><h2 class="sec">Kişiler</h2><button class="btn sm" data-act="kisi" data-mid="${m.id}">+ Ekle</button></div>
-      <div class="list">${kisiler.map(k => `<div class="row">
+    <div class="list">
+      ${kv('Dosya kodu', m.kod)}${kv('VKN', m.vkn)}${kv('TCKN', m.tckn)}${kv('Vergi dairesi', m.vergiDairesi)}
+      ${kv('İnceleme', [INC_TUR[m.incelemeTuru], m.vergiTuru].filter(Boolean).join(' · '))}${kv('Dönem', m.donem)}${kv('Gerekçe', m.gerekce)}
+      ${kv('İş emri', [m.isEmriNo, fmtD(m.isEmriTarihi)].filter(Boolean).join(' · '))}${kv('Başlama', fmtD(m.baslamaTarihi))}
+      ${m.bitisTarihi ? kv('Bitiş süresi', `${esc(fmtD(m.bitisTarihi))} ${isAktif(m) ? badge(m.bitisTarihi) : ''}`, true) : ''}
+      ${kv('Faaliyet', m.faaliyet)}${kv('Adres', m.adres)}${kv('Durum', isAktif(m) ? 'Aktif' : 'Kapandı')}
+    </div>
+    <div class="sec-row"><h2 class="sec">Kişiler</h2><button class="btn link sm" data-act="kisi" data-mid="${m.id}">Ekle</button></div>
+    <div class="list inset-avatar">${kisiler.map(k => `<div class="row">
+        ${avatar(k.ad)}
         <button class="row-main plain" data-act="kisi" data-mid="${m.id}" data-kid="${k.id}">
           <div class="row-title">${esc(k.ad)}</div>
-          <div class="row-sub">${esc([k.rol, k.tel, k.eposta].filter(Boolean).join(' · '))}</div>
+          <div class="row-sub">${esc([k.rol, k.tel].filter(Boolean).join(' · '))}</div>
         </button>
-        ${k.tel ? `<a class="icon-btn tint" href="tel:${esc(telHref(k.tel))}" data-act="call" data-mid="${m.id}" data-kid="${k.id}" aria-label="Ara">${I.phone}</a>` : ''}
-        ${k.eposta ? `<a class="icon-btn tint" href="mailto:${esc(k.eposta)}" aria-label="E-posta">${I.mail}</a>` : ''}
+        ${k.eposta ? `<a class="round-btn" href="mailto:${esc(k.eposta)}" aria-label="E-posta">${I.mail}</a>` : ''}
+        ${k.tel ? `<a class="round-btn" href="tel:${esc(telHref(k.tel))}" data-act="call" data-mid="${m.id}" data-kid="${k.id}" aria-label="Ara">${I.phone}</a>` : ''}
       </div>`).join('') || '<p class="empty">Mükellef, yetkili ve muhasebeci iletişim bilgilerini ekle. Buradan aradığında, görüşme bitince not alman hatırlatılır.</p>'}</div>
-    </section>
-    ${m.not ? `<section><h2 class="sec">Genel not</h2><div class="card pre">${esc(m.not)}</div></section>` : ''}
-    <section class="card stats">
-      <div><b>${byM('kayit', m.id).length}</b><span>görüşme</span></div>
-      <div><b>${lc ? relPast(lc) : '—'}</b><span>son temas</span></div>
-      <div><b>${byM('belge', m.id).length}</b><span>belge</span></div>
-    </section>
-    <div class="btn-row">
-      <button class="btn" data-act="toggleDurum" data-id="${m.id}">${isAktif(m) ? 'Dosyayı kapat' : 'Dosyayı yeniden aç'}</button>
-      <button class="btn danger-text" data-act="delM" data-id="${m.id}">Dosyayı sil</button>
+    ${m.not ? `<h2 class="sec">Genel not</h2><div class="card pre">${esc(m.not)}</div>` : ''}
+    <div class="list stats">
+      <a href="#/m/${m.id}/kayitlar"><b>${nK}</b><span>görüşme</span></a>
+      <a href="#/m/${m.id}/kayitlar"><b>${lc ? relPast(lc) : '—'}</b><span>son temas</span></a>
+      <a href="#/m/${m.id}/belgeler"><b>${nB}</b><span>belge</span></a>
+      <a href="#/m/${m.id}/sureler"><b>${nG}</b><span>açık süre</span></a>
+    </div>
+    <div class="list">
+      <button class="row action" data-act="toggleDurum" data-id="${m.id}">${isAktif(m) ? 'Dosyayı kapat' : 'Dosyayı yeniden aç'}</button>
+      <button class="row action danger-text" data-act="delM" data-id="${m.id}">Dosyayı sil</button>
     </div>`;
 }
 
@@ -769,40 +785,32 @@ const dosyaEtiket = m => m.kod || 'İnceleme dosyası';
 
 /* ---------- ayarlar ---------- */
 function renderSettings() {
-  const sw = (group, v, label) => `<button class="swatch${S.settings[group] === v ? ' on' : ''}" data-act="theme" data-g="${group}" data-v="${v}">
-    <span class="swatch-paper" data-paper="${group === 'paper' ? v : S.settings.paper}" data-paper-color="${group === 'paperColor' ? v : S.settings.paperColor}"></span><span>${label}</span></button>`;
-  app.innerHTML = header('Ayarlar', `<a class="icon-btn" href="#/" aria-label="Geri">${I.back}</a>`) + `<div class="page">
-    <section class="card">
-      <h2 class="sec">Sayfa görünümü</h2>
-      <div class="swatches">${PAPERS.map(([v, l]) => sw('paper', v, l)).join('')}</div>
-      <h2 class="sec sub">Kağıt rengi</h2>
-      <div class="swatches">${PAPER_COLORS.map(([v, l]) => sw('paperColor', v, l)).join('')}</div>
-    </section>
-    <section class="card">
-      <h2 class="sec">Yedekleme</h2>
-      <p class="muted">Yedek dosyası şifrelidir; açmak için yedeği aldığın andaki şifren gerekir. Dosyayı “Dosyalar” uygulamasına ya da güvendiğin bir yere kaydet. Yeni telefona geçerken kilit ekranındaki “Yedekten geri yükle” ile aktarırsın.</p>
-      <p>Son yedek: <b>${S.lastBackup ? fmtTs(S.lastBackup, true) : 'hiç alınmadı'}</b></p>
-      <div class="btn-row"><button class="btn primary" data-act="exportBackup">Yedek al</button><button class="btn" data-act="importBackup">Yedekten geri yükle</button></div>
-    </section>
-    <section class="card">
-      <h2 class="sec">Güvenlik</h2>
-      ${select('Otomatik kilit', 'autolock', String(S.settings.autolock), [['1', '1 dakika'], ['3', '3 dakika'], ['5', '5 dakika'], ['10', '10 dakika'], ['30', '30 dakika']])}
-      <div class="btn-row"><button class="btn" data-act="chpw">Şifreyi değiştir</button><button class="btn" data-act="lock">Şimdi kilitle</button></div>
-    </section>
-    <section class="card">
-      <h2 class="sec">Depolama</h2>
-      <p id="storeInfo" class="muted">Hesaplanıyor…</p>
-    </section>
-    <section class="card">
-      <h2 class="sec">Gizlilik</h2>
-      <p class="muted">Bu uygulama internete veri göndermez. Dosyalar, notlar, ses kayıtları ve belgeler bu cihazda AES-256 ile şifreli tutulur; şifre olmadan okunamaz. Uygulamanın kendisi yalnızca ilk yüklemede ve güncellemelerde indirilir, sonra internetsiz de çalışır.</p>
-    </section>
-    <section class="card">
-      <h2 class="sec">Tehlikeli bölge</h2>
-      <button class="btn danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
-    </section>
-    <p class="muted center">El Defteri 1.3</p>
-  </div>`;
+  const t = S.settings.theme || 'sistem';
+  app.innerHTML = header('Ayarlar') + `<div class="page">
+    <h2 class="sec">Görünüm</h2>
+    <div class="list pad"><div class="seg full">${THEMES.map(([v, l]) => `<button class="${t === v ? 'on' : ''}" data-act="theme" data-v="${v}">${l}</button>`).join('')}</div></div>
+    <p class="footnote">“Sistem”, iPhone'un açık/koyu mod ayarını izler.</p>
+    <h2 class="sec">Yedekleme</h2>
+    <div class="list">
+      <button class="row action" data-act="exportBackup">Yedek al</button>
+      <button class="row action" data-act="importBackup">Yedekten geri yükle</button>
+    </div>
+    <p class="footnote">Son yedek: ${S.lastBackup ? fmtTs(S.lastBackup, true) : 'hiç alınmadı'}. Yedek dosyası şifrelidir; açmak için yedeği aldığın andaki şifre gerekir. “Dosyalar”a kaydedebilirsin.</p>
+    <h2 class="sec">Güvenlik</h2>
+    <div class="list">
+      <label class="row"><div class="row-main"><div class="row-title">Otomatik kilit</div></div>
+        <select class="row-select" name="autolock">${[['1', '1 dakika'], ['3', '3 dakika'], ['5', '5 dakika'], ['10', '10 dakika'], ['30', '30 dakika']].map(([v, l]) => `<option value="${v}"${String(S.settings.autolock) === v ? ' selected' : ''}>${l}</option>`).join('')}</select>${I.chev}</label>
+      <button class="row action" data-act="chpw">Şifreyi değiştir</button>
+      <button class="row action" data-act="lock">Şimdi kilitle</button>
+    </div>
+    <h2 class="sec">Depolama</h2>
+    <div class="list"><div class="row"><div class="row-main"><div class="row-sub" id="storeInfo">Hesaplanıyor…</div></div></div></div>
+    <p class="footnote">Veriler bu cihazda AES-256 ile şifreli tutulur; şifre olmadan okunamaz. Uygulama internetsiz de çalışır.</p>
+    <div class="list">
+      <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
+    </div>
+    <p class="footnote center">El Defteri 2.0</p>
+  </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   (async () => {
     const est = await navigator.storage?.estimate?.();
@@ -880,7 +888,7 @@ function offerCallNote() {
 /* ---------- eylemler ---------- */
 const ACT = {
   closeSheet: () => closeSheet(),
-  theme: async d => { S.settings[d.g] = d.v; applyTheme(); await db.metaSet('settings', S.settings); renderSettings(); },
+  theme: async d => { S.settings.theme = d.v; applyTheme(); await db.metaSet('settings', S.settings); renderSettings(); },
   lock: () => lock(),
   filter: d => { S.filter = d.v; renderHome(); },
   newM: () => mukellefSheet(),

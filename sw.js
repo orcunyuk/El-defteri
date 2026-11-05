@@ -1,5 +1,5 @@
 // Uygulama dosyalarını önbelleğe alır; internetsiz çalışır. Kullanıcı verisi burada yoktur (IndexedDB'de şifreli).
-const CACHE = 'el-defteri-v4';
+const CACHE = 'el-defteri-v5';
 const ASSETS = ['./', './index.html', './app.css', './app.js', './db.js', './crypto.js', './extract.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
   './vendor/pdfjs/pdf.min.js', './vendor/pdfjs/pdf.worker.min.js'];
