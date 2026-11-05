@@ -2,6 +2,8 @@
 
 Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
 
+- **Belgeden doldurma:** İş emri, beyanname gibi belgeler (PDF, taranmış PDF ya da fotoğraf) seçildiğinde unvan, VKN/TCKN, vergi dairesi, dönem, inceleme türü, iş emri sayısı ve tarihi, adres ile mükellef ve SMMM iletişim bilgileri otomatik doldurulur. Okuma tamamen cihazda yapılır: metin içeren PDF'ler PDF.js ile, taranmış belgeler Türkçe Tesseract OCR ile okunur. Bulunan alanlar fosforlu işaretlenir, kayıttan önce kontrol edilmelidir.
+- **Görünüm:** Giriş ekranı kara kaplı defter kapağıdır. Sayfa düzeni (çizgili, kareli, noktalı, düz) ve kağıt rengi (sarı, krem, beyaz) Ayarlar'dan seçilir.
 - **Mükellef dosyaları:** Unvan, VKN, vergi dairesi, inceleme türü ve dönemi, iş emri bilgileri, başlama ve bitiş süresi (VUK 140'a göre öneri), adres ve kişiler (tek dokunuşla arama ya da e-posta).
 - **Görüşme günlüğü:** Tarih, tür, görüşülen kişi, konu, yazılı not ve sesli not. Not alırken isteğe bağlı takip süresi de eklenebilir. Uygulamadan bir kişi arandığında, uygulamaya dönünce “görüşmeni not al” hatırlatması çıkar.
 - **Belgeler:** İş emri, beyanname, tutanak ve yazışmalar PDF ya da fotoğraf olarak eklenir, uygulama içinde görüntülenir.
@@ -14,6 +16,13 @@ Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
 - Tüm kayıtlar, ses kayıtları ve belgeler **AES-256-GCM** ile şifrelenir. Anahtar, şifreden PBKDF2-SHA256 (310.000 tur) ile türetilen bir anahtarla sarmalanır.
 - Uygulama, ayarlanan süre boyunca kullanılmazsa otomatik kilitlenir.
 - **Şifre unutulursa veriler kurtarılamaz.**
+
+## Kullanılan kütüphaneler
+
+`vendor/` klasöründe, uygulamanın içinde gelir. Dış sunucuya bağlanılmaz.
+
+- PDF.js 3.11.174 (Apache-2.0)
+- Tesseract.js 5.1.1 ve Türkçe dil verisi `tur` 4.0.0_best_int (Apache-2.0)
 
 ## Yayınlama
 

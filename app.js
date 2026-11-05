@@ -1,10 +1,18 @@
 import * as db from './db.js';
 import * as cr from './crypto.js';
+import { extractText, parse } from './extract.js';
 
 const $ = (s, el = document) => el.querySelector(s);
+function defaultSettings() { return { autolock: 5, paper: 'cizgili', paperColor: 'sari' }; }
+const PAPERS = [['cizgili', 'Çizgili'], ['kareli', 'Kareli'], ['noktali', 'Noktalı'], ['duz', 'Düz']];
+const PAPER_COLORS = [['sari', 'Sarı'], ['krem', 'Krem'], ['beyaz', 'Beyaz']];
+function applyTheme() {
+  document.documentElement.dataset.paper = S.settings.paper;
+  document.documentElement.dataset.paperColor = S.settings.paperColor;
+}
 const app = $('#app');
 const S = {
-  key: null, vault: null, items: new Map(), settings: { autolock: 5 }, lastBackup: null,
+  key: null, vault: null, items: new Map(), settings: defaultSettings(), lastBackup: null,
   filter: 'aktif', q: '', lastActive: Date.now(), urls: new Set(), recording: false,
   viewerFile: null, backupFile: null,
 };
@@ -171,20 +179,22 @@ window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); }
 /* ---------- kilit ---------- */
 function renderLock() {
   const has = !!S.vault;
-  app.innerHTML = `<div class="lock">
-    <img src="icons/icon-192.png" class="lock-icon" alt="">
-    <h1>El Defteri</h1>
-    ${has ? '<p class="muted">Devam etmek için şifreni gir.</p>'
-      : `<p class="muted">Hoş geldin. Tüm veriler <b>yalnızca bu cihazda</b>, belirleyeceğin şifreyle şifrelenerek saklanır. Hiçbir sunucuya gönderilmez.</p>
-         <p class="banner warn">Şifreyi unutursan veriler kurtarılamaz. Güçlü ama unutmayacağın bir şifre seç.</p>`}
-    <form id="lockForm">
-      ${userField}
-      <input type="password" name="p1" autocomplete="${has ? 'current-password' : 'new-password'}" placeholder="Şifre" required minlength="${has ? 1 : 6}">
-      ${has ? '' : '<input type="password" name="p2" autocomplete="new-password" placeholder="Şifre (tekrar)" required minlength="6">'}
-      <button class="btn primary block" type="submit">${has ? 'Kilidi aç' : 'Şifreyi oluştur ve başla'}</button>
-      <p class="err" id="lockErr" role="alert"></p>
-    </form>
-    <button class="btn link" data-act="importBackup">Yedekten geri yükle</button>
+  app.innerHTML = `<div class="cover">
+    <div class="cover-spine"></div>
+    <div class="cover-band"></div>
+    <div class="cover-inner">
+      <h1 class="cover-title">Notebook</h1>
+      <div class="cover-rule"></div>
+      <form id="lockForm" class="cover-form">
+        ${has ? '' : `<p class="cover-note">Notlar yalnızca bu telefonda, belirleyeceğin şifreyle şifreli saklanır. Şifreyi unutursan veriler kurtarılamaz.</p>`}
+        ${userField}
+        <input type="password" name="p1" autocomplete="${has ? 'current-password' : 'new-password'}" placeholder="${has ? 'Şifre' : 'Yeni şifre'}" required minlength="${has ? 1 : 6}" aria-label="Şifre">
+        ${has ? '' : '<input type="password" name="p2" autocomplete="new-password" placeholder="Şifre (tekrar)" required minlength="6" aria-label="Şifre tekrar">'}
+        <button class="cover-btn" type="submit">${has ? 'Aç' : 'Defteri oluştur'}</button>
+        <p class="err" id="lockErr" role="alert"></p>
+      </form>
+      <button class="cover-link" data-act="importBackup">Yedekten geri yükle</button>
+    </div>
   </div>`;
   const form = $('#lockForm');
   const err = $('#lockErr');
@@ -196,6 +206,7 @@ function renderLock() {
     err.textContent = '';
     if (!has && p1 !== form.p2.value) { err.textContent = 'Şifreler aynı değil.'; return; }
     btn.disabled = true; btn.textContent = has ? 'Açılıyor…' : 'Hazırlanıyor…';
+    let opened = false;
     try {
       if (has) {
         const key = await cr.openVault(p1, S.vault);
@@ -209,15 +220,27 @@ function renderLock() {
         navigator.storage?.persist?.();
       }
       S.lastActive = Date.now();
-      render();
+      opened = true;
+      openCover();
       offerCallNote();
     } catch (ex) {
       console.error(ex);
       err.textContent = 'Hata: ' + ex.message;
     } finally {
-      btn.disabled = false; btn.textContent = has ? 'Kilidi aç' : 'Şifreyi oluştur ve başla';
+      if (!opened) { btn.disabled = false; btn.textContent = has ? 'Aç' : 'Defteri oluştur'; }
     }
   };
+}
+// Kapak, sayfanın üstünden sola doğru açılır
+function openCover() {
+  const cover = app.querySelector('.cover');
+  document.activeElement?.blur?.();
+  if (!cover || matchMedia('(prefers-reduced-motion: reduce)').matches) return render();
+  document.body.append(cover);
+  cover.classList.add('floating');
+  render();
+  requestAnimationFrame(() => requestAnimationFrame(() => cover.classList.add('opening')));
+  setTimeout(() => cover.remove(), 900);
 }
 function lock() {
   closeSheet();
@@ -350,7 +373,14 @@ function ozetHTML(m) {
 
 function mukellefSheet(m = null) {
   const v = m || { incelemeTuru: 'tam' };
+  const docs = [];      // eklenecek belgeler: { file, tur }
+  const foundKisi = []; // belgeden bulunan kişiler
   const form = openSheet(m ? 'Dosyayı düzenle' : 'Yeni dosya', `
+    <div class="autofill">
+      <button type="button" class="btn primary block" data-autofill>${I.doc} Belgeden doldur</button>
+      <p class="hint">İş emri, beyanname vb. seç (PDF, taranmış belge ya da fotoğraf). Bilgiler telefonun içinde okunur, hiçbir yere gönderilmez. Seçilen belgeler dosyaya da eklenir.</p>
+      <div class="af-status" aria-live="polite"></div>
+    </div>
     ${field('Unvan / Ad Soyad', 'unvan', v.unvan, { required: true })}
     <div class="row2">${field('Dosya kodu', 'kod', v.kod, { placeholder: 'ör. 2026/14' })}${field('VKN / TCKN', 'vkn', v.vkn, { inputmode: 'numeric' })}</div>
     ${field('Vergi dairesi', 'vergiDairesi', v.vergiDairesi)}
@@ -364,10 +394,60 @@ function mukellefSheet(m = null) {
   { onSubmit: async (f, fd) => {
     const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
     for (const k of ['unvan', 'kod', 'vkn', 'vergiDairesi', 'incelemeTuru', 'donem', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'not']) item[k] = String(fd.get(k) ?? '').trim();
+    const kisiler = [...(item.kisiler || [])];
+    for (const k of foundKisi) {
+      const same = kisiler.find(x => (k.tel && telHref(x.tel) === telHref(k.tel)) || (k.eposta && x.eposta === k.eposta) || x.ad === k.ad);
+      if (same) { same.tel ||= k.tel; same.eposta ||= k.eposta; } else kisiler.push({ id: uid(), ...k });
+    }
+    item.kisiler = kisiler;
     await save(item);
+    for (const d of docs) {
+      const fileId = uid();
+      await saveFile(fileId, await d.file.arrayBuffer());
+      await save({ id: uid(), kind: 'belge', mid: item.id, tur: d.tur, ad: d.file.name, mime: d.file.type || 'application/octet-stream', size: d.file.size, aciklama: '', fileId });
+    }
+    if (docs.length) toast(`${docs.length} belge dosyaya eklendi`);
     if (!m) location.hash = `#/m/${item.id}`;
   } });
   const e = form.elements;
+  const status = form.querySelector('.af-status');
+  const LABELS = { unvan: 'Unvan', vkn: 'VKN/TCKN', vergiDairesi: 'Vergi dairesi', incelemeTuru: 'İnceleme türü', donem: 'Dönem', isEmriNo: 'İş emri sayısı', isEmriTarihi: 'İş emri tarihi', adres: 'Adres' };
+  form.querySelector('[data-autofill]').onclick = async ev => {
+    const btn = ev.currentTarget;
+    const files = await pickFiles('application/pdf,image/*');
+    if (!files.length) return;
+    btn.disabled = true;
+    const filled = new Set();
+    try {
+      // İş emri önce işlensin; ilk bulunan değer geçerli olur
+      const results = [];
+      for (const file of files) {
+        status.textContent = `${file.name}: okunuyor…`;
+        let text = '';
+        try { text = await extractText(file, msg => { status.textContent = `${file.name}: ${msg}`; }); } catch (err) { console.error(err); }
+        const r = parse(text);
+        results.push(r);
+        docs.push({ file, tur: r.tur || 'Diğer' });
+      }
+      results.sort((a, b) => (b.tur === 'İş emri') - (a.tur === 'İş emri'));
+      for (const r of results) {
+        for (const [k, val] of Object.entries(r.fields)) {
+          const el = e[k];
+          if (!el || filled.has(k) || (el.value && !el.dataset.af && !(k === 'incelemeTuru' && !m))) continue;
+          el.value = val; el.dataset.af = '1'; el.classList.add('filled'); filled.add(k);
+          el.addEventListener('input', () => el.classList.remove('filled'), { once: true });
+        }
+        for (const k of r.kisiler) if (!foundKisi.some(x => x.ad === k.ad && x.rol === k.rol)) foundKisi.push(k);
+      }
+      auto();
+      const kisiTxt = foundKisi.map(k => `${k.ad} (${k.rol}${k.tel ? ', ' + k.tel : ''}${k.eposta ? ', ' + k.eposta : ''})`).join('; ');
+      status.innerHTML = filled.size || foundKisi.length
+        ? `<b>Bulunanlar:</b> ${esc([...filled].map(k => LABELS[k]).join(', ') || '—')}${kisiTxt ? `<br><b>Kişiler:</b> ${esc(kisiTxt)}` : ''}<br><span class="muted">Fosforlu alanları belgeyle karşılaştırıp kontrol et. ${files.length} belge kaydedince dosyaya eklenecek.</span>`
+        : `Belgeden bilgi okunamadı; alanları elle doldurabilirsin. ${files.length} belge yine de dosyaya eklenecek.`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
   const auto = () => {
     if (!e.baslamaTarihi.value || (e.bitisTarihi.value && !e.bitisTarihi.dataset.auto)) return;
     e.bitisTarihi.value = addMonths(e.baslamaTarihi.value, e.incelemeTuru.value === 'sinirli' ? 6 : 12);
@@ -617,7 +697,15 @@ const dosyaEtiket = m => m.kod || 'İnceleme dosyası';
 
 /* ---------- ayarlar ---------- */
 function renderSettings() {
+  const sw = (group, v, label) => `<button class="swatch${S.settings[group] === v ? ' on' : ''}" data-act="theme" data-g="${group}" data-v="${v}">
+    <span class="swatch-paper" data-paper="${group === 'paper' ? v : S.settings.paper}" data-paper-color="${group === 'paperColor' ? v : S.settings.paperColor}"></span><span>${label}</span></button>`;
   app.innerHTML = header('Ayarlar', `<a class="icon-btn" href="#/" aria-label="Geri">${I.back}</a>`) + `<div class="page">
+    <section class="card">
+      <h2 class="sec">Sayfa görünümü</h2>
+      <div class="swatches">${PAPERS.map(([v, l]) => sw('paper', v, l)).join('')}</div>
+      <h2 class="sec sub">Kağıt rengi</h2>
+      <div class="swatches">${PAPER_COLORS.map(([v, l]) => sw('paperColor', v, l)).join('')}</div>
+    </section>
     <section class="card">
       <h2 class="sec">Yedekleme</h2>
       <p class="muted">Yedek dosyası şifrelidir; açmak için yedeği aldığın andaki şifren gerekir. Dosyayı “Dosyalar” uygulamasına ya da güvendiğin bir yere kaydet. Yeni telefona geçerken kilit ekranındaki “Yedekten geri yükle” ile aktarırsın.</p>
@@ -641,7 +729,7 @@ function renderSettings() {
       <h2 class="sec">Tehlikeli bölge</h2>
       <button class="btn danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </section>
-    <p class="muted center">El Defteri 1.0</p>
+    <p class="muted center">El Defteri 1.1</p>
   </div>`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   (async () => {
@@ -662,6 +750,13 @@ async function buildBackup() {
     files: files.map(r => ({ id: r.id, iv: cr.b64(r.iv), data: cr.b64(r.data) })),
   };
   return new File([JSON.stringify(obj)], `el-defteri-yedek-${today()}.json`, { type: 'application/json' });
+}
+function pickFiles(accept) {
+  return new Promise(res => {
+    const i = Object.assign(document.createElement('input'), { type: 'file', accept, multiple: true });
+    i.onchange = () => res([...i.files]);
+    i.click();
+  });
 }
 function pickFile(accept) {
   return new Promise(res => {
@@ -713,6 +808,7 @@ function offerCallNote() {
 /* ---------- eylemler ---------- */
 const ACT = {
   closeSheet: () => closeSheet(),
+  theme: async d => { S.settings[d.g] = d.v; applyTheme(); await db.metaSet('settings', S.settings); renderSettings(); },
   lock: () => lock(),
   filter: d => { S.filter = d.v; renderHome(); },
   newM: () => mukellefSheet(),
@@ -803,7 +899,7 @@ const ACT = {
   { submitLabel: 'Sil', onSubmit: async (f, fd) => {
     if (fd.get('onay').trim().toLocaleUpperCase('tr') !== 'SİL') { toast('Onay metni hatalı'); return false; }
     await db.wipe();
-    S.vault = null; S.lastBackup = null; S.settings = { autolock: 5 };
+    S.vault = null; S.lastBackup = null; S.settings = defaultSettings(); applyTheme();
     lock();
   } }),
 };
@@ -825,6 +921,7 @@ async function init() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   S.vault = await db.metaGet('vault');
   S.settings = { ...S.settings, ...(await db.metaGet('settings')) };
+  applyTheme();
   S.lastBackup = await db.metaGet('lastBackup');
   render();
 }
