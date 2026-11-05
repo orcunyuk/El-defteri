@@ -486,21 +486,32 @@ function acikSureler() {
     ...all('gorev').filter(g => !g.bitti && ids.has(g.mid) && g.tarih).map(g => ({ d: g.tarih, href: `#/m/${g.mid}/sureler`, title: g.baslik, sub: `${S.items.get(g.mid)?.unvan || ''} · ${fmtD(g.tarih)}`, g })),
   ].sort((a, b) => a.d.localeCompare(b.d));
 }
+function sureBox(a) {
+  const n = daysUntil(a.d);
+  const tone = n < 0 ? 'red' : n <= 3 ? 'orange' : 'green';
+  const unvan = a.m?.unvan || S.items.get(a.g?.mid)?.unvan || '';
+  return `<a class="sbox ${tone}" href="${a.href}">
+    <span class="sbox-badge">${relDays(n)}</span>
+    <b>${esc(a.title)}</b>
+    <span>${esc(unvan)}</span>
+    <small>${fmtD(a.d)}</small>
+  </a>`;
+}
 function renderHome() {
   const alerts = acikSureler().filter(a => daysUntil(a.d) <= (a.g ? 7 : 30));
   const banners = [];
-  if (!isStandalone()) banners.push(`<div class="banner warn"><b>Ana ekrana ekle:</b> Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile yükleyip uygulamayı oradan aç. Safari sekmesinde kalan veriler, siteye bir süre girilmezse iOS tarafından silinebilir.</div>`);
-  if (S.items.size && (!S.lastBackup || Date.now() - S.lastBackup > 14 * 864e5)) {
-    banners.push(`<a class="banner" href="#/ayarlar"><b>Yedek al:</b> ${S.lastBackup ? 'Son yedek ' + fmtTs(S.lastBackup) + '.' : 'Henüz yedek almadın.'} Telefon kaybolursa veriler yedek olmadan kurtarılamaz.</a>`);
+  if (!isStandalone()) banners.push(`<div class="banner warn"><b>Ana ekrana ekle:</b> Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile yükleyip uygulamayı oradan aç.</div>`);
+  if (S.items.size && !cloudOn() && (!S.lastBackup || Date.now() - S.lastBackup > 14 * 864e5)) {
+    banners.push(`<a class="banner" href="#/ayarlar"><b>Yedek al:</b> ${S.lastBackup ? 'Son yedek ' + fmtTs(S.lastBackup) + '.' : 'Henüz yedek almadın.'}</a>`);
   }
   const seg = (v, l) => `<button class="${S.filter === v ? 'on' : ''}" data-act="filter" data-v="${v}">${l}</button>`;
   app.innerHTML = header('Dosyalar', { left: `<button class="nav-btn" data-act="lock">Kilitle</button>`, right: `<button class="nav-btn icon" data-act="newM" aria-label="Yeni dosya">${I.plus}</button>` }) +
     `<div class="page">
-      <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan, dosya kodu veya VKN ara" value="${esc(S.q)}"></label>
-      ${banners.join('')}
-      ${alerts.length ? `<h2 class="sec">Yaklaşan süreler</h2><div class="list">${alerts.map(a => sureRow(a.href, a.title, a.sub, a.d)).join('')}</div>` : ''}
+      <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan veya VKN ara" value="${esc(S.q)}"></label>
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
-      <div id="mlist" class="list inset-avatar"></div>
+      <div id="mlist"></div>
+      ${alerts.length ? `<h2 class="sec">Yaklaşan süreler</h2><div class="box-grid">${alerts.map(sureBox).join('')}</div>` : ''}
+      ${banners.join('')}
     </div>
     <button class="fab" data-act="newM" aria-label="Yeni dosya">${I.plus}</button>${tabbar('dosyalar')}`;
   $('#q').oninput = e => { S.q = e.target.value; drawMList(); };
@@ -512,16 +523,20 @@ function drawMList() {
     .filter(m => (m.durum || 'aktif') === S.filter)
     .filter(m => !q || [m.unvan, m.kod, m.vkn, m.tckn].some(x => (x || '').toLocaleLowerCase('tr').includes(q)))
     .sort((a, b) => coll.compare(a.unvan, b.unvan));
-  $('#mlist').innerHTML = list.map(m => {
+  $('#mlist').innerHTML = list.length ? `<div class="box-grid">${list.map(m => {
     const lc = lastContact(m.id);
     const og = byM('gorev', m.id).filter(g => !g.bitti).length;
-    return `<a class="row" href="#/m/${m.id}">${avatar(m.unvan)}
-      <div class="row-main">
-        <div class="row-title">${esc(m.unvan)}</div>
-        <div class="row-sub">${esc([m.kod, m.vkn ? 'VKN ' + m.vkn : m.tckn && 'TCKN ' + m.tckn, m.donem, m.incelemeTuru && (m.incelemeTuru === 'sinirli' ? 'Sınırlı' : 'Tam')].filter(Boolean).join(' · '))}</div>
-      </div>
-      <span class="row-detail">${lc ? relPast(lc) : og ? og + ' süre' : ''}</span>${I.chev}</a>`;
-  }).join('') || `<p class="empty">${q ? 'Eşleşen dosya yok.' : S.filter === 'aktif' ? 'Henüz dosya yok. <b>+</b> ile yeni dosya aç.' : 'Kapanan dosya yok.'}</p>`;
+    const tur = m.incelemeTuru === 'sinirli' ? 'Sınırlı' : m.incelemeTuru === 'tam' ? 'Tam' : '';
+    return `<a class="dbox" href="#/m/${m.id}">
+      <b>${esc(m.unvan)}</b>
+      <dl>
+        <dt>${m.vkn || !m.tckn ? 'VKN' : 'TCKN'}</dt><dd>${esc(m.vkn || m.tckn || '—')}</dd>
+        <dt>Yıl</dt><dd>${esc([m.donem, tur].filter(Boolean).join(' · ') || '—')}</dd>
+      </dl>
+      <small>${lc ? 'Son temas: ' + relPast(lc) : 'Görüşme yok'}${og ? ` · ${og} süre` : ''}</small>
+    </a>`;
+  }).join('')}</div>`
+    : `<div class="list"><p class="empty">${q ? 'Eşleşen dosya yok.' : S.filter === 'aktif' ? 'Henüz dosya yok. <b>+</b> ile yeni dosya aç.' : 'Kapanan dosya yok.'}</p></div>`;
 }
 
 /* ---------- tüm süreler ---------- */
