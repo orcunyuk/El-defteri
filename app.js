@@ -999,7 +999,12 @@ async function init() {
     app.innerHTML = '<div class="lock"><h1>El Defteri</h1><p class="banner warn">Bu uygulama yalnızca güvenli bağlantı (HTTPS) üzerinden çalışır.</p></div>';
     return;
   }
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    // Yeni sürüm devreye girince sayfayı bir kez yenile (kilit ekranındayken)
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded && !S.key) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+  }
   S.vault = await db.metaGet('vault');
   S.settings = { ...S.settings, ...(await db.metaGet('settings')) };
   applyTheme();
