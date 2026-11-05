@@ -1,6 +1,7 @@
 import * as db from './db.js';
 import * as cr from './crypto.js';
 import * as cloud from './cloud.js';
+import { extractText, parse } from './extract.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 function defaultSettings() { return { autolock: 5, theme: 'sistem' }; }
@@ -688,8 +689,14 @@ async function paketFlow() {
 
 function mukellefSheet(m = null) {
   const v = m || { incelemeTuru: 'tam' };
+  const foundKisi = []; // belgeden bulunan kişiler (kaydederken eklenir)
   const form = openSheet(m ? 'Dosyayı düzenle' : 'Yeni dosya', `
-    ${m ? '' : '<button type="button" class="btn block" data-act="paket">📦 Hazır paketi içe aktar</button><p class="hint center">ya da bilgileri elle gir</p>'}
+    <div class="autofill">
+      <button type="button" class="btn primary block" data-autofill>${I.doc} Belgeden doldur</button>
+      ${m ? '' : '<button type="button" class="btn block" data-act="paket">📦 Hazır paketi içe aktar</button>'}
+      <p class="hint">İş emri, beyanname, yoklama fişi ya da ekran görüntüsü seç. Bilgiler telefonun içinde okunur; belge saklanmaz, hiçbir yere gönderilmez.</p>
+      <div class="af-status" aria-live="polite"></div>
+    </div>
     ${field('Adı / Unvanı', 'unvan', v.unvan, { required: true })}
     ${field('Kısa ad (isteğe bağlı)', 'kisaAd', v.kisaAd, { placeholder: 'Boş bırakırsan otomatik kısaltılır' })}
     <p class="hint" id="kisaOnizle"></p>
@@ -705,10 +712,49 @@ function mukellefSheet(m = null) {
   { onSubmit: async (f, fd) => {
     const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
     for (const k of ['unvan', 'kisaAd', 'vkn', 'tckn', 'donem', 'vergiDairesi', 'incelemeTuru', 'vergiTuru', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'faaliyet']) item[k] = String(fd.get(k) ?? '').trim();
+    if (foundKisi.length) item.kisiler = mergeKisiler(item.kisiler, foundKisi);
     await save(item);
+    if (foundKisi.length) toast(`${foundKisi.length} kişi / telefon eklendi`);
     if (!m) location.hash = `#/m/${item.id}`;
   } });
   const e = form.elements;
+  // Belgeden doldur: seçilen belgeler okunur, boş alanlar doldurulur (belgeler saklanmaz)
+  const status = form.querySelector('.af-status');
+  const LABELS = { unvan: 'Unvan', vkn: 'VKN', tckn: 'TCKN', vergiDairesi: 'Vergi dairesi', faaliyet: 'Faaliyet', incelemeTuru: 'İnceleme türü', donem: 'İnceleme yılı', vergiTuru: 'Vergi türü', isEmriNo: 'İş emri sayısı', isEmriTarihi: 'İş emri tarihi', adres: 'Adres' };
+  form.querySelector('[data-autofill]').onclick = async ev => {
+    const btn = ev.currentTarget;
+    const files = await pickFiles('application/pdf,image/*');
+    if (!files.length) return;
+    btn.disabled = true;
+    const filled = new Set();
+    try {
+      const results = [];
+      for (const file of files) {
+        status.textContent = `${file.name}: okunuyor…`;
+        let text = '';
+        try { text = await extractText(file, msg => { status.textContent = `${file.name}: ${msg}`; }); } catch (err) { console.error(err); }
+        results.push(parse(text));
+      }
+      results.sort((a, b) => (b.tur === 'İş emri') - (a.tur === 'İş emri')); // iş emri öncelikli
+      for (const r of results) {
+        for (const [k, val] of Object.entries(r.fields)) {
+          const el = e[k];
+          if (!el || filled.has(k) || (el.value && !el.dataset.af && !(k === 'incelemeTuru' && !m))) continue;
+          el.value = val; el.dataset.af = '1'; el.classList.add('filled'); filled.add(k);
+          el.addEventListener('input', () => el.classList.remove('filled'), { once: true });
+        }
+        // Aynı kişinin farklı numarası da alınır; yalnızca aynı numara tekrar edilmez
+        for (const k of r.kisiler) if (!foundKisi.some(x => fold(x.ad) === fold(k.ad) && telHref(x.tel || '') === telHref(k.tel || ''))) foundKisi.push(k);
+      }
+      auto(); onizle();
+      const kisiTxt = foundKisi.map(k => `${k.ad} (${k.rol}${k.tel ? ', ' + k.tel : ''})`).join('; ');
+      status.innerHTML = filled.size || foundKisi.length
+        ? `<b>Bulunanlar:</b> ${esc([...filled].map(k => LABELS[k]).join(', ') || '—')}${kisiTxt ? `<br><b>Telefonlar:</b> ${esc(kisiTxt)}` : ''}<br><span class="muted">Sarı alanları belgeyle karşılaştırıp kontrol et. Telefonlar kaydedince eklenecek.</span>`
+        : 'Belgeden bilgi okunamadı; alanları elle doldurabilirsin.';
+    } finally {
+      btn.disabled = false;
+    }
+  };
   const onizle = () => { const k = kisaAd({ unvan: e.unvan.value, kisaAd: e.kisaAd.value.trim() }); $('#kisaOnizle').textContent = k && k !== e.unvan.value.trim() ? 'Listede görünecek: ' + k : ''; };
   e.unvan.addEventListener('input', onizle); e.kisaAd.addEventListener('input', onizle); onizle();
   const auto = () => {

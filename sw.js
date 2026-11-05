@@ -1,9 +1,9 @@
 // Önce ağ, internet yoksa önbellek: güncellemeler hemen görünür, uygulama internetsiz de açılır.
 // Kullanıcı verisi burada yoktur (IndexedDB'de şifreli).
-const CACHE = 'el-defteri-v9';
-const ASSETS = ['./', './index.html', './app.css', './app.js', './db.js', './crypto.js', './cloud.js', './manifest.webmanifest',
+const CACHE = 'el-defteri-v10';
+const ASSETS = ['./', './index.html', './app.css', './app.js', './db.js', './crypto.js', './cloud.js', './extract.js', './manifest.webmanifest',
   './icons/el-defteri-192.png', './icons/el-defteri-512.png', './icons/el-defteri-180.png',
-  './vendor/firebase/firebase.js'];
+  './vendor/firebase/firebase.js', './vendor/pdfjs/pdf.min.js', './vendor/pdfjs/pdf.worker.min.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
