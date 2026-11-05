@@ -204,7 +204,7 @@ window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); d
 function renderLock() {
   const has = !!S.vault;
   app.innerHTML = `<div class="lock">
-    <img src="icons/icon-192.png" class="lock-icon" alt="">
+    <img src="icons/el-defteri-192.png" class="lock-icon" alt="">
     <h1>El Defteri</h1>
     <p class="muted">${has ? 'Devam etmek için şifreni gir.' : 'Veriler yalnızca bu cihazda, belirleyeceğin şifreyle şifreli saklanır.'}</p>
     <form id="lockForm" class="lock-form">
