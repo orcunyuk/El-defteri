@@ -45,6 +45,7 @@ const fmtSure = sec => `${Math.floor(sec / 60)}:${pad(Math.floor(sec % 60))}`;
 const fmtSize = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
 const telHref = t => String(t).replace(/[^\d+]/g, '');
 const coll = new Intl.Collator('tr');
+const fold = s => String(s || '').toLocaleLowerCase('tr').replace(/\s+/g, ' ').trim();
 const isStandalone = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
 function trackURL(blob) { const u = URL.createObjectURL(blob); S.urls.add(u); return u; }
 
@@ -304,7 +305,7 @@ function drawMList() {
   const q = S.q.trim().toLocaleLowerCase('tr');
   const list = all('mukellef')
     .filter(m => (m.durum || 'aktif') === S.filter)
-    .filter(m => !q || [m.unvan, m.kod, m.vkn].some(x => (x || '').toLocaleLowerCase('tr').includes(q)))
+    .filter(m => !q || [m.unvan, m.kod, m.vkn, m.tckn].some(x => (x || '').toLocaleLowerCase('tr').includes(q)))
     .sort((a, b) => coll.compare(a.unvan, b.unvan));
   $('#mlist').innerHTML = list.map(m => {
     const lc = lastContact(m.id);
@@ -312,7 +313,7 @@ function drawMList() {
     return `<a class="row" href="#/m/${m.id}">
       <div class="row-main">
         <div class="row-title">${esc(m.unvan)}</div>
-        <div class="row-sub">${esc([m.kod, m.vkn && 'VKN ' + m.vkn, m.donem].filter(Boolean).join(' · '))}</div>
+        <div class="row-sub">${esc([m.kod, m.vkn ? 'VKN ' + m.vkn : m.tckn && 'TCKN ' + m.tckn, m.donem].filter(Boolean).join(' · '))}</div>
         <div class="row-sub">${lc ? 'Son temas: ' + relPast(lc) : 'Henüz görüşme kaydı yok'}${og ? ` · ${og} açık süre` : ''}</div>
       </div><span class="chev">›</span></a>`;
   }).join('') || `<p class="empty">${q ? 'Eşleşen dosya yok.' : S.filter === 'aktif' ? 'Henüz dosya yok. Sağ alttaki <b>Yeni dosya</b> ile başla.' : 'Kapanan dosya yok.'}</p>`;
@@ -337,8 +338,10 @@ function renderDetail(id, tab) {
 
 function ozetHTML(m) {
   const rows = [
-    ['Dosya kodu', esc(m.kod)], ['VKN / TCKN', esc(m.vkn)], ['Vergi dairesi', esc(m.vergiDairesi)],
-    ['İnceleme', esc(INC_TUR[m.incelemeTuru])], ['Dönem', esc(m.donem)],
+    ['Dosya kodu', esc(m.kod)], ['VKN', esc(m.vkn)], ['TCKN', esc(m.tckn)], ['Vergi dairesi', esc(m.vergiDairesi)],
+    ['Faaliyet', esc(m.faaliyet)],
+    ['İnceleme', esc([INC_TUR[m.incelemeTuru], m.vergiTuru].filter(Boolean).join(' · '))], ['Dönem', esc(m.donem)],
+    ['Gerekçe', esc(m.gerekce)],
     ['İş emri', esc([m.isEmriNo, fmtD(m.isEmriTarihi)].filter(Boolean).join(' · '))],
     ['Başlama', esc(fmtD(m.baslamaTarihi))],
     ['Bitiş süresi', m.bitisTarihi ? `${esc(fmtD(m.bitisTarihi))} ${isAktif(m) ? badge(m.bitisTarihi) : ''}` : ''],
@@ -382,9 +385,12 @@ function mukellefSheet(m = null) {
       <div class="af-status" aria-live="polite"></div>
     </div>
     ${field('Unvan / Ad Soyad', 'unvan', v.unvan, { required: true })}
-    <div class="row2">${field('Dosya kodu', 'kod', v.kod, { placeholder: 'ör. 2026/14' })}${field('VKN / TCKN', 'vkn', v.vkn, { inputmode: 'numeric' })}</div>
+    ${field('Dosya kodu', 'kod', v.kod, { placeholder: 'ör. 2026/14' })}
+    <div class="row2">${field('VKN', 'vkn', v.vkn, { inputmode: 'numeric' })}${field('TCKN', 'tckn', v.tckn, { inputmode: 'numeric' })}</div>
     ${field('Vergi dairesi', 'vergiDairesi', v.vergiDairesi)}
+    ${field('Faaliyet (işi)', 'faaliyet', v.faaliyet)}
     <div class="row2">${select('İnceleme türü', 'incelemeTuru', v.incelemeTuru, Object.entries(INC_TUR))}${field('İncelenen dönem', 'donem', v.donem, { placeholder: 'ör. 2024' })}</div>
+    <div class="row2">${field('Vergi türü', 'vergiTuru', v.vergiTuru, { placeholder: 'ör. KDV' })}${field('Gerekçe', 'gerekce', v.gerekce)}</div>
     <div class="row2">${field('İş emri sayısı', 'isEmriNo', v.isEmriNo)}${field('İş emri tarihi', 'isEmriTarihi', v.isEmriTarihi, { type: 'date' })}</div>
     <div class="row2">${field('İncelemeye başlama', 'baslamaTarihi', v.baslamaTarihi, { type: 'date' })}${field('Bitiş süresi', 'bitisTarihi', v.bitisTarihi, { type: 'date' })}</div>
     <p class="hint">Bitiş süresi, başlama tarihine göre otomatik önerilir (VUK 140: tam inceleme 12 ay, sınırlı 6 ay; ek süre hariç). Mutlaka kontrol et.</p>
@@ -393,10 +399,11 @@ function mukellefSheet(m = null) {
     <p class="hint">“Dosya kodu” takvime eklenen hatırlatmalarda unvan yerine kullanılır.</p>`,
   { onSubmit: async (f, fd) => {
     const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
-    for (const k of ['unvan', 'kod', 'vkn', 'vergiDairesi', 'incelemeTuru', 'donem', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'not']) item[k] = String(fd.get(k) ?? '').trim();
+    for (const k of ['unvan', 'kod', 'vkn', 'tckn', 'vergiDairesi', 'faaliyet', 'incelemeTuru', 'donem', 'vergiTuru', 'gerekce', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'not']) item[k] = String(fd.get(k) ?? '').trim();
     const kisiler = [...(item.kisiler || [])];
     for (const k of foundKisi) {
-      const same = kisiler.find(x => (k.tel && telHref(x.tel) === telHref(k.tel)) || (k.eposta && x.eposta === k.eposta) || x.ad === k.ad);
+      // Mükellef ile SMMM aynı e-postayı kullanabilir: yalnızca aynı rol ya da aynı kişi birleşir
+      const same = kisiler.find(x => fold(x.ad) === fold(k.ad) || (x.rol === k.rol && ((k.tel && telHref(x.tel) === telHref(k.tel)) || (k.eposta && x.eposta === k.eposta))));
       if (same) { same.tel ||= k.tel; same.eposta ||= k.eposta; } else kisiler.push({ id: uid(), ...k });
     }
     item.kisiler = kisiler;
@@ -404,14 +411,14 @@ function mukellefSheet(m = null) {
     for (const d of docs) {
       const fileId = uid();
       await saveFile(fileId, await d.file.arrayBuffer());
-      await save({ id: uid(), kind: 'belge', mid: item.id, tur: d.tur, ad: d.file.name, mime: d.file.type || 'application/octet-stream', size: d.file.size, aciklama: '', fileId });
+      await save({ id: uid(), kind: 'belge', mid: item.id, tur: d.tur, ad: d.file.name, mime: d.file.type || 'application/octet-stream', size: d.file.size, aciklama: d.baslik || '', fileId });
     }
     if (docs.length) toast(`${docs.length} belge dosyaya eklendi`);
     if (!m) location.hash = `#/m/${item.id}`;
   } });
   const e = form.elements;
   const status = form.querySelector('.af-status');
-  const LABELS = { unvan: 'Unvan', vkn: 'VKN/TCKN', vergiDairesi: 'Vergi dairesi', incelemeTuru: 'İnceleme türü', donem: 'Dönem', isEmriNo: 'İş emri sayısı', isEmriTarihi: 'İş emri tarihi', adres: 'Adres' };
+  const LABELS = { unvan: 'Unvan', vkn: 'VKN', tckn: 'TCKN', vergiDairesi: 'Vergi dairesi', faaliyet: 'Faaliyet', incelemeTuru: 'İnceleme türü', donem: 'Dönem', vergiTuru: 'Vergi türü', gerekce: 'Gerekçe', isEmriNo: 'İş emri sayısı', isEmriTarihi: 'İş emri tarihi', adres: 'Adres' };
   form.querySelector('[data-autofill]').onclick = async ev => {
     const btn = ev.currentTarget;
     const files = await pickFiles('application/pdf,image/*');
@@ -427,7 +434,7 @@ function mukellefSheet(m = null) {
         try { text = await extractText(file, msg => { status.textContent = `${file.name}: ${msg}`; }); } catch (err) { console.error(err); }
         const r = parse(text);
         results.push(r);
-        docs.push({ file, tur: r.tur || 'Diğer' });
+        docs.push({ file, tur: r.tur || 'Diğer', baslik: r.baslik });
       }
       results.sort((a, b) => (b.tur === 'İş emri') - (a.tur === 'İş emri'));
       for (const r of results) {
@@ -729,7 +736,7 @@ function renderSettings() {
       <h2 class="sec">Tehlikeli bölge</h2>
       <button class="btn danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </section>
-    <p class="muted center">El Defteri 1.1</p>
+    <p class="muted center">El Defteri 1.2</p>
   </div>`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   (async () => {
