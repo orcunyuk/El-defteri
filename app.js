@@ -1,6 +1,7 @@
 import * as db from './db.js';
 import * as cr from './crypto.js';
 import { extractText, parse } from './extract.js';
+import * as cloud from './cloud.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 function defaultSettings() { return { autolock: 5, theme: 'sistem' }; }
@@ -90,30 +91,116 @@ const byM = (kind, mid) => all(kind).filter(i => i.mid === mid);
 const isAktif = m => (m.durum || 'aktif') === 'aktif';
 const lastContact = mid => byM('kayit', mid).reduce((a, k) => (k.tarih > a ? k.tarih : a), '');
 
+// S.cloud = { uid, email, cursor, lastSync } → bulut eşitlemesi açık
+const cloudOn = () => !!S.cloud;
 async function save(item) {
   item.updated = Date.now();
   item.created ??= item.updated;
   const { iv, data } = await cr.encJSON(S.key, item);
-  await db.put('items', { id: item.id, kind: item.kind, iv, data });
+  await db.put('items', { id: item.id, kind: item.kind, iv, data, updated: item.updated, ...(cloudOn() ? { dirty: 1 } : {}) });
   S.items.set(item.id, item);
+  scheduleSync();
 }
 async function removeItems(ids, fileIds = []) {
-  await db.delMany('items', ids);
-  await db.delMany('files', fileIds);
+  if (cloudOn()) {
+    // Silinenler diğer cihazlara da bildirilsin diye işaretlenir
+    const now = Date.now();
+    await db.putMany('items', ids.map(id => ({ id, kind: S.items.get(id)?.kind || '', deleted: 1, updated: now, dirty: 1 })));
+    await db.putMany('files', fileIds.filter(Boolean).map(id => ({ id, deleted: 1, dirty: 1 })));
+  } else {
+    await db.delMany('items', ids);
+    await db.delMany('files', fileIds);
+  }
   ids.forEach(id => S.items.delete(id));
+  scheduleSync();
 }
-async function saveFile(id, buf) { const { iv, data } = await cr.encBytes(S.key, buf); await db.put('files', { id, iv, data }); }
+async function saveFile(id, buf) {
+  const { iv, data } = await cr.encBytes(S.key, buf);
+  await db.put('files', { id, iv, data, ...(cloudOn() ? { dirty: 1 } : {}) });
+  scheduleSync();
+}
 async function loadFile(id, mime) {
-  const r = await db.get('files', id);
-  if (!r) return null;
+  let r = await db.get('files', id);
+  // Başka cihazda eklenen dosya bu cihazda yoksa buluttan indir
+  if ((!r || r.deleted) && cloudOn() && navigator.onLine) {
+    try {
+      const c = await cloud.pullFile(id);
+      if (c) { r = { id, iv: c.iv, data: c.data }; await db.put('files', r); }
+    } catch (e) { console.warn('dosya indirilemedi', e); }
+  }
+  if (!r || r.deleted) return null;
   return new Blob([await cr.decBytes(S.key, r.iv, r.data)], { type: mime });
 }
 async function loadItems() {
   S.items.clear();
   for (const r of await db.getAll('items')) {
+    if (r.deleted) continue;
     try { S.items.set(r.id, await cr.decJSON(S.key, r.iv, r.data)); } catch (e) { console.error('Çözülemedi', r.id, e); }
   }
 }
+
+/* ---------- bulut eşitleme ---------- */
+let syncTimer = null, syncing = null;
+function scheduleSync(ms = 1500) {
+  if (!cloudOn()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => sync(), ms);
+}
+async function sync({ quiet = true } = {}) {
+  if (!cloudOn() || !S.key) return;
+  if (!navigator.onLine) { S.syncError = 'çevrimdışı'; return; }
+  if (syncing) return syncing;
+  syncing = (async () => {
+    try {
+      await cloud.init();
+      const u = cloud.currentUser();
+      if (!u || u.uid !== S.cloud.uid) throw new Error('oturum yok');
+      // 1) Bu cihazdaki değişiklikleri gönder
+      const dirty = (await db.getAll('items')).filter(r => r.dirty);
+      if (dirty.length) {
+        await cloud.pushItems(dirty);
+        for (const r of dirty) {
+          const cur = await db.get('items', r.id);
+          if (!cur || cur.updated !== r.updated) continue;
+          if (cur.deleted) await db.delMany('items', [r.id]);
+          else { delete cur.dirty; await db.put('items', cur); }
+        }
+      }
+      for (const f of (await db.getAll('files')).filter(f => f.dirty)) {
+        if (f.deleted) { await cloud.deleteFile(f.id); await db.delMany('files', [f.id]); }
+        else { await cloud.pushFile(f.id, f.iv, f.data); delete f.dirty; await db.put('files', f); }
+      }
+      // 2) Diğer cihazlardaki değişiklikleri al
+      const { recs, cursor } = await cloud.pullItems(S.cloud.cursor);
+      let changed = false;
+      for (const r of recs) {
+        const cur = await db.get('items', r.id);
+        if (cur && cur.updated >= r.updated) continue; // bu cihazdaki aynı ya da daha yeni
+        if (r.deleted) {
+          if (cur) { await db.delMany('items', [r.id]); S.items.delete(r.id); changed = true; }
+          continue;
+        }
+        await db.put('items', { id: r.id, kind: r.kind, iv: r.iv, data: r.data, updated: r.updated });
+        try { S.items.set(r.id, await cr.decJSON(S.key, r.iv, r.data)); changed = true; } catch (e) { console.error('Çözülemedi', r.id, e); }
+      }
+      S.cloud.cursor = Math.max(S.cloud.cursor || 0, cursor);
+      S.cloud.lastSync = Date.now();
+      await db.metaSet('cloud', S.cloud);
+      S.syncError = null;
+      if (changed && S.key && !$('#sheet').classList.contains('open')) render();
+    } catch (e) {
+      console.error('eşitleme', e);
+      S.syncError = e.code || e.message;
+      if (!quiet) toast('Eşitleme hatası: ' + S.syncError);
+    } finally {
+      syncing = null;
+    }
+  })();
+  return syncing;
+}
+setInterval(() => sync(), 60000);
+addEventListener('online', () => sync());
+const pendingCount = async () => (await db.getAll('items')).filter(r => r.dirty).length;
 
 /* ---------- arayüz parçaları ---------- */
 // iOS gezinme çubuğu: küçük başlık kaydırınca görünür, büyük başlık içerikte
@@ -200,56 +287,159 @@ function render() {
 }
 window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); document.body.classList.remove('scrolled'); });
 
-/* ---------- kilit ---------- */
-function renderLock() {
-  const has = !!S.vault;
+/* ---------- giriş ve kilit ---------- */
+const G_LOGO = '<svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
+const sameVault = (a, b) => a && b && cr.b64(a.wrapped) === cr.b64(b.wrapped) && cr.b64(a.salt) === cr.b64(b.salt);
+function lockShell(inner, { footer = true } = {}) {
+  const u = cloud.currentUser();
   app.innerHTML = `<div class="lock">
     <img src="icons/el-defteri-192.png" class="lock-icon" alt="">
     <h1>El Defteri</h1>
-    <p class="muted">${has ? 'Devam etmek için şifreni gir.' : 'Veriler yalnızca bu cihazda, belirleyeceğin şifreyle şifreli saklanır.'}</p>
+    ${inner}
+    ${footer && u ? `<p class="footnote center lock-foot">${esc(u.email)} · <button class="btn link sm" data-act="signout">Çıkış yap</button></p>` : ''}
+  </div>`;
+}
+let lockSeq = 0;
+async function renderLock() {
+  const seq = ++lockSeq;
+  lockShell('<p class="muted">Yükleniyor…</p>', { footer: false });
+  let ok = true;
+  try { await cloud.init(); } catch (e) { console.error(e); ok = false; }
+  if (seq !== lockSeq || S.key) return;
+  // Bağlantı yoksa ve bu cihaz daha önce hazırlandıysa çevrimdışı açılabilir
+  if (!ok) return S.vault && S.cloud ? lockPassword('local') : lockShell('<p class="banner warn">İnternet bağlantısı gerekiyor. Bağlanınca yeniden dene.</p><button class="btn primary block lg" data-act="relock">Yeniden dene</button>', { footer: false });
+  const u = cloud.currentUser();
+  if (!u) return lockGoogle();
+  if (S.vault && S.cloud?.uid === u.uid) return lockPassword('local');
+  lockShell('<p class="muted">Hesap kontrol ediliyor…</p>');
+  let cv;
+  try { cv = await cloud.getVault(); } catch (e) {
+    if (seq !== lockSeq) return;
+    if (e.code === 'permission-denied') {
+      return lockShell(`<p class="banner warn"><b>${esc(u.email)}</b> için erişim izni yok. Yöneticiden (${esc(cloud.ADMIN)}) seni üye olarak eklemesini iste.</p>
+        <button class="btn block lg" data-act="signout">Başka hesapla giriş yap</button>`, { footer: false });
+    }
+    return lockShell(`<p class="banner warn">Bağlantı hatası: ${esc(e.code || e.message)}</p><button class="btn primary block lg" data-act="relock">Yeniden dene</button>`);
+  }
+  if (seq !== lockSeq) return;
+  if (cv) return lockPassword('cloud', cv);
+  if (S.vault && !S.cloud) return lockPassword('migrate');
+  return lockPassword('new');
+}
+function lockGoogle() {
+  const emu = ['localhost', '127.0.0.1'].includes(location.hostname) && location.search.includes('emu');
+  lockShell(`<p class="muted">Devam etmek için Google hesabınla giriş yap. Yalnızca izin verilen Gmail adresleri girebilir.</p>
+    <div class="lock-form">
+      <button class="btn google block lg" id="gBtn">${G_LOGO}<span>Google ile giriş yap</span></button>
+      ${emu ? '<input class="lock-input test" id="testEmail" placeholder="test e-posta"><button class="btn block" id="testBtn">Test girişi</button>' : ''}
+      <p class="err" id="lockErr" role="alert"></p>
+    </div>
+    ${S.vault && !S.cloud ? '<p class="banner">Bu cihazda kayıtlı verilerin var. Giriş yaptıktan sonra buluta taşınacak.</p>' : ''}
+    <p class="footnote center">Veriler cihazında şifrelenir; buluta yalnızca şifreli hâli gider.</p>
+    ${S.vault && !S.cloud ? '' : '<button class="btn link" data-act="importBackup">Yedekten geri yükle</button>'}`, { footer: false });
+  const err = $('#lockErr');
+  const go = async fn => {
+    err.textContent = '';
+    try { const u = await fn(); if (u) renderLock(); }
+    catch (e) {
+      if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
+      console.error(e);
+      err.textContent = 'Giriş yapılamadı: ' + (e.code || e.message);
+    }
+  };
+  $('#gBtn').onclick = () => go(() => cloud.signIn());
+  if (emu) $('#testBtn').onclick = () => go(() => cloud.signInTest($('#testEmail').value.trim()));
+}
+// mode: local (bu cihazda hazır) · cloud (buluttaki kasa) · migrate (yerel veriyi buluta taşı) · new (ilk kurulum)
+function lockPassword(mode, cloudVault) {
+  const yeni = mode === 'new';
+  const msg = {
+    local: 'Devam etmek için şifreni gir.',
+    cloud: 'Bulut verilerini açmak için şifreni gir (ilk cihazda belirlediğin şifre).',
+    migrate: 'Bu cihazdaki kayıtlar buluta yüklenecek. Mevcut şifreni gir.',
+    new: 'Uygulama şifreni belirle. Verilerin bu şifreyle şifrelenir; yeni bir cihazda girerken de istenir.',
+  }[mode];
+  lockShell(`<p class="muted">${msg}</p>
     <form id="lockForm" class="lock-form">
       ${userField}
       <div class="list">
-        <input class="lock-input" type="password" name="p1" autocomplete="${has ? 'current-password' : 'new-password'}" placeholder="${has ? 'Şifre' : 'Yeni şifre (en az 6 karakter)'}" required minlength="${has ? 1 : 6}" aria-label="Şifre">
-        ${has ? '' : '<input class="lock-input" type="password" name="p2" autocomplete="new-password" placeholder="Şifre (tekrar)" required minlength="6" aria-label="Şifre tekrar">'}
+        <input class="lock-input" type="password" name="p1" autocomplete="${yeni ? 'new-password' : 'current-password'}" placeholder="${yeni ? 'Yeni şifre (en az 6 karakter)' : 'Şifre'}" required minlength="${yeni ? 6 : 1}" aria-label="Şifre">
+        ${yeni ? '<input class="lock-input" type="password" name="p2" autocomplete="new-password" placeholder="Şifre (tekrar)" required minlength="6" aria-label="Şifre tekrar">' : ''}
       </div>
-      <button class="btn primary block lg" type="submit">${has ? 'Aç' : 'Başla'}</button>
+      <button class="btn primary block lg" type="submit">${yeni ? 'Başla' : 'Aç'}</button>
       <p class="err" id="lockErr" role="alert"></p>
-      ${has ? '' : '<p class="hint center">Şifreyi unutursan veriler kurtarılamaz.</p>'}
-    </form>
-    <button class="btn link" data-act="importBackup">Yedekten geri yükle</button>
-  </div>`;
+      ${yeni ? '<p class="hint center">Şifreyi unutursan veriler kurtarılamaz.</p>' : ''}
+    </form>`);
   const form = $('#lockForm');
   const err = $('#lockErr');
   if (!/iPhone|iPad|Android/.test(navigator.userAgent)) form.p1.focus();
   form.onsubmit = async e => {
     e.preventDefault();
     const btn = form.querySelector('[type=submit]');
-    const p1 = form.p1.value;
+    const label = btn.textContent;
+    const pw = form.p1.value;
     err.textContent = '';
-    if (!has && p1 !== form.p2.value) { err.textContent = 'Şifreler aynı değil.'; return; }
-    btn.disabled = true; btn.textContent = has ? 'Açılıyor…' : 'Hazırlanıyor…';
+    if (yeni && pw !== form.p2.value) { err.textContent = 'Şifreler aynı değil.'; return; }
+    btn.disabled = true; btn.textContent = 'Açılıyor…';
     try {
-      if (has) {
-        const key = await cr.openVault(p1, S.vault);
+      const u = cloud.currentUser();
+      if (mode === 'local') {
+        const key = await cr.openVault(pw, S.vault);
         if (!key) { err.textContent = 'Şifre yanlış.'; form.p1.value = ''; return; }
         S.key = key;
         await loadItems();
+      } else if (mode === 'cloud') {
+        const key = await cr.openVault(pw, cloudVault);
+        if (!key) { err.textContent = 'Şifre yanlış.'; form.p1.value = ''; return; }
+        // Bu cihazda başka şifreyle oluşturulmuş eski kayıtlar varsa: aynı şifre açıyorsa taşı, açmıyorsa izin iste
+        let eski = null;
+        if (S.vault && !sameVault(S.vault, cloudVault)) {
+          const lk = await cr.openVault(pw, S.vault);
+          if (lk) eski = { key: lk, items: await db.getAll('items'), files: await db.getAll('files') };
+          else if (!confirm('Bu cihazda farklı bir şifreyle kaydedilmiş eski veriler var ve buluta aktarılamıyor. Silinip bulut verileri yüklensin mi? (Gerekirse önce vazgeçip eski şifreyle yedek al.)')) return;
+        }
+        await db.clearData();
+        await db.metaSet('vault', cloudVault);
+        S.vault = cloudVault; S.key = key;
+        S.cloud = { uid: u.uid, email: u.email, cursor: null };
+        await db.metaSet('cloud', S.cloud);
+        if (eski) {
+          for (const r of eski.items) { if (r.deleted) continue; try { await save(await cr.decJSON(eski.key, r.iv, r.data)); } catch {} }
+          for (const f of eski.files) { if (f.deleted) continue; try { await saveFile(f.id, await cr.decBytes(eski.key, f.iv, f.data)); } catch {} }
+        }
+        btn.textContent = 'Veriler indiriliyor…';
+        await sync({ quiet: false });
+      } else if (mode === 'migrate') {
+        const key = await cr.openVault(pw, S.vault);
+        if (!key) { err.textContent = 'Şifre yanlış.'; form.p1.value = ''; return; }
+        await cloud.putVault(S.vault);
+        S.key = key;
+        S.cloud = { uid: u.uid, email: u.email, cursor: null };
+        await db.metaSet('cloud', S.cloud);
+        await db.putMany('items', (await db.getAll('items')).map(r => ({ ...r, updated: r.updated || Date.now(), dirty: 1 })));
+        await db.putMany('files', (await db.getAll('files')).map(f => ({ ...f, dirty: 1 })));
+        await loadItems();
+        btn.textContent = 'Buluta yükleniyor…';
+        await sync({ quiet: false });
       } else {
-        const { vault, key } = await cr.createVault(p1);
+        const { vault, key } = await cr.createVault(pw);
+        await cloud.putVault(vault);
         await db.metaSet('vault', vault);
         S.vault = vault; S.key = key;
+        S.cloud = { uid: u.uid, email: u.email, cursor: null };
+        await db.metaSet('cloud', S.cloud);
         navigator.storage?.persist?.();
       }
       S.lastActive = Date.now();
       document.activeElement?.blur?.();
       render();
       offerCallNote();
+      if (mode === 'local') sync();
     } catch (ex) {
       console.error(ex);
-      err.textContent = 'Hata: ' + ex.message;
+      err.textContent = 'Hata: ' + (ex.code || ex.message);
     } finally {
-      btn.disabled = false; btn.textContent = has ? 'Aç' : 'Başla';
+      btn.disabled = false; btn.textContent = label;
     }
   };
 }
@@ -271,6 +461,7 @@ setInterval(checkIdle, 15000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   checkIdle();
+  sync();
   offerCallNote();
 });
 
@@ -786,7 +977,18 @@ const dosyaEtiket = m => m.kod || 'İnceleme dosyası';
 /* ---------- ayarlar ---------- */
 function renderSettings() {
   const t = S.settings.theme || 'sistem';
+  const u = cloud.currentUser();
   app.innerHTML = header('Ayarlar') + `<div class="page">
+    ${cloudOn() ? `<h2 class="sec">Hesap</h2>
+    <div class="list inset-avatar">
+      <div class="row">${avatar(S.cloud.email)}<div class="row-main"><div class="row-title">${esc(S.cloud.email)}</div><div class="row-sub" id="syncInfo">Eşitleme durumu…</div></div></div>
+      <button class="row action" data-act="syncNow">Şimdi eşitle</button>
+      <button class="row action danger-text" data-act="signout">Çıkış yap</button>
+    </div>
+    <p class="footnote">Veriler cihazında şifrelenip buluta öyle gönderilir; Google dahil kimse içeriği okuyamaz.</p>` : ''}
+    ${cloud.isAdmin() ? `<h2 class="sec">Üyeler</h2>
+    <div class="list" id="uyeler"><div class="row"><div class="row-sub">Yükleniyor…</div></div></div>
+    <p class="footnote">Yalnızca bu listedeki Gmail adresleri üye olup giriş yapabilir. Herkes yalnızca kendi dosyalarını görür. Sen (${esc(cloud.ADMIN)}) her zaman girebilirsin.</p>` : ''}
     <h2 class="sec">Görünüm</h2>
     <div class="list pad"><div class="seg full">${THEMES.map(([v, l]) => `<button class="${t === v ? 'on' : ''}" data-act="theme" data-v="${v}">${l}</button>`).join('')}</div></div>
     <p class="footnote">“Sistem”, iPhone'un açık/koyu mod ayarını izler.</p>
@@ -806,12 +1008,14 @@ function renderSettings() {
     <h2 class="sec">Depolama</h2>
     <div class="list"><div class="row"><div class="row-main"><div class="row-sub" id="storeInfo">Hesaplanıyor…</div></div></div></div>
     <p class="footnote">Veriler bu cihazda AES-256 ile şifreli tutulur; şifre olmadan okunamaz. Uygulama internetsiz de çalışır.</p>
-    <div class="list">
+    ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
-    </div>
+    </div>`}
     <p class="footnote center">El Defteri 2.0</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
+  if (cloudOn()) drawSyncInfo();
+  if (cloud.isAdmin()) drawUyeler();
   (async () => {
     const est = await navigator.storage?.estimate?.();
     const per = await navigator.storage?.persisted?.();
@@ -819,6 +1023,24 @@ function renderSettings() {
     if (!el) return;
     el.innerHTML = `${est ? `Kullanılan: <b>${fmtSize(est.usage || 0)}</b>. ` : ''}${isStandalone() ? 'Ana ekran uygulaması olarak çalışıyor.' : '<b>Ana ekrana eklenmemiş</b>: Safari → Paylaş → Ana Ekrana Ekle.'} ${per ? 'Kalıcı depolama açık.' : ''}`;
   })();
+}
+
+async function drawSyncInfo() {
+  const el = $('#syncInfo');
+  if (!el) return;
+  const n = await pendingCount();
+  el.textContent = S.syncError ? `Eşitlenemedi (${S.syncError})${n ? ` · ${n} kayıt bekliyor` : ''}`
+    : `${S.cloud.lastSync ? 'Son eşitleme: ' + fmtTs(S.cloud.lastSync, true) : 'Henüz eşitlenmedi'}${n ? ` · ${n} kayıt bekliyor` : ''}`;
+}
+let uyeList = [];
+async function drawUyeler() {
+  const el = $('#uyeler');
+  if (!el) return;
+  try { uyeList = await cloud.getAllow(); } catch (e) { el.innerHTML = `<div class="row"><div class="row-sub">Liste alınamadı: ${esc(e.code || e.message)}</div></div>`; return; }
+  el.innerHTML = uyeList.map(m => `<div class="row">${avatar(m)}<div class="row-main"><div class="row-title">${esc(m)}</div></div>
+      <button class="btn link sm danger-text" data-act="uyeSil" data-email="${esc(m)}">Kaldır</button></div>`).join('')
+    + `<button class="row action" data-act="uyeEkle">Üye ekle</button>`;
+  el.classList.toggle('inset-avatar', uyeList.length > 0);
 }
 
 async function buildBackup() {
@@ -852,24 +1074,47 @@ async function importFlow() {
   try { obj = JSON.parse(await file.text()); if (obj.app !== 'el-defteri') throw new Error(); } catch { return toast('Bu dosya geçerli bir El Defteri yedeği değil'); }
   openSheet('Yedekten geri yükle', `
     <p class="muted">${esc(file.name)} · ${obj.items.length} kayıt · ${fmtTs(Date.parse(obj.createdAt), true)}</p>
-    ${S.vault ? '<p class="banner warn">Bu cihazdaki mevcut tüm veriler silinip yerine yedek yüklenecek.</p>' : ''}
+    ${cloudOn() && S.key ? '<p class="banner">Yedekteki kayıtlar mevcut verilerine eklenecek ve buluta da gönderilecek. Mevcut kayıtların silinmez.</p>'
+      : S.vault ? '<p class="banner warn">Bu cihazdaki mevcut tüm veriler silinip yerine yedek yüklenecek.</p>' : ''}
     ${userField}
     ${field('Yedeğin şifresi', 'pw', '', { type: 'password', required: true, autocomplete: 'current-password' })}
-    <p class="hint">Geri yüklemeden sonra uygulamanın şifresi, yedeği aldığın andaki şifre olur.</p>`,
+    <p class="hint">${cloudOn() && S.key ? 'Yedeği aldığın andaki şifreyi gir; kayıtlar mevcut şifrenle yeniden şifrelenir.' : 'Geri yüklemeden sonra uygulamanın şifresi, yedeği aldığın andaki şifre olur.'}</p>`,
   { submitLabel: 'Yükle', onSubmit: async (f, fd) => {
     const vault = cr.vaultFromJSON(obj.vault);
     const key = await cr.openVault(fd.get('pw'), vault);
     if (!key) { toast('Şifre yanlış'); return false; }
+    if (cloudOn() && S.key) {
+      // Bulut açıkken: yedeği birleştir (mevcut anahtarla yeniden şifreleyip ekle)
+      let n = 0;
+      for (const r of obj.items) {
+        try {
+          const it = await cr.decJSON(key, cr.unb64(r.iv), cr.unb64(r.data));
+          const cur = S.items.get(it.id);
+          if (cur && (cur.updated || 0) >= (it.updated || 0)) continue;
+          await save(it); n++;
+        } catch (e) { console.warn('yedek kaydı atlandı', r.id); }
+      }
+      for (const fl of obj.files) {
+        if ((await db.get('files', fl.id))?.data) continue;
+        try { await saveFile(fl.id, await cr.decBytes(key, cr.unb64(fl.iv), cr.unb64(fl.data))); } catch {}
+      }
+      sync();
+      location.hash = '#/';
+      toast(`${n} kayıt eklendi`);
+      return;
+    }
     await db.replaceAll(vault,
       obj.items.map(r => ({ id: r.id, kind: r.kind, iv: cr.unb64(r.iv), data: cr.unb64(r.data) })),
       obj.files.map(r => ({ id: r.id, iv: cr.unb64(r.iv), data: cr.unb64(r.data) })));
-    S.vault = vault; S.key = key;
+    S.vault = vault;
     S.lastBackup = Date.parse(obj.createdAt);
     await db.metaSet('lastBackup', S.lastBackup);
-    await loadItems();
-    S.lastActive = Date.now();
+    await db.metaSet('cloud', null);
+    S.cloud = null;
+    // Uygulama Google girişi olmadan açılmaz: yedek yerelde hazır, girişten sonra buluta taşınır
+    S.key = null;
     location.hash = '#/';
-    toast('Yedek yüklendi');
+    toast('Yedek yüklendi. Google ile giriş yapınca buluta taşınacak.');
   } });
 }
 
@@ -959,6 +1204,35 @@ const ACT = {
     toast('Yedek kaydedildi');
   },
   importBackup: () => importFlow(),
+  relock: () => renderLock(),
+  syncNow: async (d, el) => { el.disabled = true; el.textContent = 'Eşitleniyor…'; await sync({ quiet: false }); if (!S.syncError) toast('Eşitlendi'); renderSettings(); },
+  signout: () => {
+    if (!S.key) { cloud.signOutUser().then(() => renderLock()); return; }
+    openSheet('Çıkış yap', `<p class="card">Çıkış yapınca bu cihazdaki kopya silinir; verilerin bulutta şifreli olarak kalır. Tekrar girişte Google hesabın ve uygulama şifren istenir.</p>`,
+      { submitLabel: 'Çıkış yap', onSubmit: async () => {
+        await sync({ quiet: false });
+        const n = await pendingCount();
+        if (n && !confirm(`${n} kayıt henüz buluta gönderilemedi (internet yok olabilir). Yine de çıkılsın mı? Bu kayıtlar kaybolur.`)) return false;
+        await db.clearData();
+        await cloud.signOutUser();
+        S.vault = null; S.cloud = null; S.lastBackup = null;
+        history.replaceState(null, '', location.pathname + location.search + '#/');
+        lock();
+      } });
+  },
+  uyeEkle: () => openSheet('Üye ekle', `${field('Gmail adresi', 'email', '', { type: 'email', required: true, placeholder: 'ornek@gmail.com', autocomplete: 'off' })}
+    <p class="hint">Eklediğin kişi uygulamayı açıp bu Gmail hesabıyla giriş yapabilir ve kendi şifresini belirler. Senin dosyalarını göremez.</p>`,
+  { submitLabel: 'Ekle', onSubmit: async (f, fd) => {
+    const m = fd.get('email').trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m)) { toast('Geçerli bir e-posta yaz'); return false; }
+    await cloud.setAllow([...new Set([...uyeList, m])]);
+    toast('Üye eklendi');
+  } }),
+  uyeSil: async d => {
+    if (!confirm(`${d.email} üyelikten çıkarılsın mı? Artık giriş yapamaz (bulutta duran şifreli verisi silinmez).`)) return;
+    await cloud.setAllow(uyeList.filter(x => x !== d.email));
+    drawUyeler();
+  },
   paket: () => paketFlow(),
   chpw: () => openSheet('Şifreyi değiştir', `${userField}
     ${field('Mevcut şifre', 'old', '', { type: 'password', required: true, autocomplete: 'current-password' })}
@@ -970,6 +1244,7 @@ const ACT = {
     const k = await cr.openVault(fd.get('old'), S.vault, true);
     if (!k) { toast('Mevcut şifre yanlış'); return false; }
     const vault = await cr.wrapWith(k, fd.get('p1'));
+    if (cloudOn()) await cloud.putVault(vault); // önce bulut: başarısız olursa yerelde de değişmez
     await db.metaSet('vault', vault);
     S.vault = vault;
     S.key = await cr.openVault(fd.get('p1'), vault);
@@ -1009,6 +1284,7 @@ async function init() {
   S.settings = { ...S.settings, ...(await db.metaGet('settings')) };
   applyTheme();
   S.lastBackup = await db.metaGet('lastBackup');
+  S.cloud = (await db.metaGet('cloud')) || null;
   render();
 }
 init();

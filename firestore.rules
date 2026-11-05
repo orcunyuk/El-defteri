@@ -1,0 +1,31 @@
+rules_version = '2';
+// El Defteri — Firestore güvenlik kuralları
+// Firebase Console → Firestore Database → Rules sekmesine yapıştırılır.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function girisli() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function yonetici() {
+      return girisli() && request.auth.token.email == 'orcunyuk@gmail.com';
+    }
+    function izinli() {
+      return yonetici() || (girisli()
+        && exists(/databases/$(database)/documents/config/izinliler)
+        && request.auth.token.email in get(/databases/$(database)/documents/config/izinliler).data.emails);
+    }
+
+    // İzinli Gmail listesi: yalnızca yönetici görür ve değiştirir
+    match /config/izinliler {
+      allow read, write: if yonetici();
+    }
+
+    // Her üye yalnızca kendi (şifreli) verisine erişir
+    match /users/{uid} {
+      allow read, write: if izinli() && request.auth.uid == uid;
+      match /{rest=**} {
+        allow read, write: if izinli() && request.auth.uid == uid;
+      }
+    }
+  }
+}

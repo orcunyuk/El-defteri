@@ -31,9 +31,18 @@ Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
 
 Paket şifresizdir. Aktardıktan sonra paket dosyasını Dosyalar uygulamasından silmek gerekir.
 
+## Google ile giriş ve bulut (uçtan uca şifreli)
+
+- Giriş Google hesabıyla yapılır (Firebase Authentication). Yalnızca yöneticinin (`cloud.js` içindeki `ADMIN`) **Ayarlar → Üyeler** bölümüne eklediği Gmail adresleri girebilir.
+- Her kullanıcının verisi Firestore'da `users/{uid}` altında durur. Kayıtlar ve dosyalar **cihazda şifrelenmiş hâliyle** gönderilir. Şifre anahtarı uygulama şifresiyle sarmalanır, sunucu içeriği okuyamaz.
+- Uygulama önce cihazdaki veriyle çalışır (internetsiz de açılır), değişiklikleri arka planda eşitler. Çakışmada son değişiklik geçerli olur.
+- Yeni cihazda Google ile giriş yapılır, ardından uygulama şifresi girilir ve veriler buluttan iner.
+- Erişim kuralları `firestore.rules` dosyasında. Firebase Console → Firestore Database → Rules sekmesine yapıştırılıp yayınlanır.
+- Firebase JS SDK 11.10.0 `vendor/firebase/` altında paketlidir (Apache-2.0).
+
 ## Gizlilik ve güvenlik
 
-- Veriler **yalnızca cihazda** (IndexedDB) tutulur. Sunucu, bulut ya da analitik yoktur. CSP ayarı dışarıya bağlantıyı engeller.
+- Veriler cihazda (IndexedDB) şifreli tutulur. Bulut eşitlemesinde de yalnızca şifreli hâli gönderilir. CSP ayarı Google/Firebase dışındaki bağlantıları engeller.
 - Tüm kayıtlar, ses kayıtları ve belgeler **AES-256-GCM** ile şifrelenir. Anahtar, şifreden PBKDF2-SHA256 (310.000 tur) ile türetilen bir anahtarla sarmalanır.
 - Uygulama, ayarlanan süre boyunca kullanılmazsa otomatik kilitlenir.
 - **Şifre unutulursa veriler kurtarılamaz.**

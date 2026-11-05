@@ -43,3 +43,16 @@ export async function wipe() {
   ['meta', 'items', 'files'].forEach(s => t.objectStore(s).clear());
   return done(t);
 }
+export async function putMany(store, vals) {
+  if (!vals.length) return;
+  const d = await open(); const t = d.transaction(store, 'readwrite'); const s = t.objectStore(store);
+  vals.forEach(v => s.put(v)); return done(t);
+}
+// Kayıtları ve dosyaları siler, ayarları korur
+export async function clearData() {
+  const d = await open();
+  const t = d.transaction(['meta', 'items', 'files'], 'readwrite');
+  t.objectStore('items').clear(); t.objectStore('files').clear();
+  ['vault', 'cloud', 'lastBackup'].forEach(k => t.objectStore('meta').delete(k));
+  return done(t);
+}
