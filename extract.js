@@ -406,3 +406,67 @@ export function parse(text) {
   }
   return { tur, baslik, fields: out, kisiler };
 }
+
+/* ---------- bilgi isteme yazısı ---------- */
+// Yazıdan sayı, tarih, konu, cevap süresi ve muhatabı (unvan, VKN) çıkarır.
+// dosya: { vkn, tckn } → yazıdaki numara bunlarla aynıysa muhatap mükellefin kendisidir.
+const SAYI_GUN = { bir: 1, iki: 2, uc: 3, bes: 5, yedi: 7, on: 10, 'on bes': 15, 'yirmi': 20, 'otuz': 30, 'kirk bes': 45, 'altmis': 60 };
+export function parseBilgi(text, dosya = {}) {
+  let lines = text.split(/\r?\n/).map(l => l.replace(/[ ]+/g, ' ').trim().replace(/^[\s—–\-_/|.,;:'"“”‘’]+(?=[A-Za-zÇĞİÖŞÜçğıöşü0-9])/, '')).filter(Boolean);
+  const sig = lines.findIndex(l => /bu belge,?\s+guvenli\s+elektronik\s+imza/.test(fold(l)));
+  if (sig > 0) lines = lines.slice(0, sig);
+  lines = lines.filter(l => !/belge\s+dogrulama|kep\s+adresi|internet\s+adresi|faks\s+no|bilgi\s+icin|www\./.test(fold(l)));
+  const F = fold(lines.join('\n'));
+  const out = {};
+
+  // Sayı ve tarih ("Sayı : E-12345678-105.01-98765   10.11.2026")
+  const sayiLine = lines.find(l => /^sayi\b/.test(fold(l))) || '';
+  // OCR köşeli parantezi bazen "/", "(" ya da ")" okur: 663.05/12345) → 663.05[12345]
+  const no = clean(after(lines, [/^sayi(?:si)?\b/])).split(/\s/)[0].replace(/(\d)[/([{|](\d{3,6})[)\]}|]/, '$1[$2]');
+  if (no && /\d/.test(no) && no.length < 60) out.sayi = no;
+  const t = toISO(sayiLine) || toISO(after(lines, [/^tarih(?:i)?\b/, /\btarih(?:i)?\s*:/])) || toISO(lines.slice(0, 12).join(' '));
+  if (t) out.yaziTarihi = t;
+
+  // Konu: konu satırı; genel bir ifadeyse istenen ilk maddeyle zenginleştir
+  let konu = clean(after(lines, [/^konu\b/]));
+  const genel = !konu || /^bilgi\s+(?:ve\s+belge\s+)?(?:istenmesi|istemi|talebi|istenilmesi)$/.test(fold(konu));
+  const madde = lines.find(l => /^(?:1\s*[-.)]|a\s*[-.)])\s*\S/.test(fold(l)));
+  if (genel && madde) konu = clean(madde.replace(/^(?:1|a)\s*[-.)]\s*/i, ''));
+  if (hasWord(konu)) out.konu = konu.length > 140 ? konu.slice(0, 137) + '…' : konu;
+
+  // Cevap süresi: "15 gün içinde", "on beş (15) gün içerisinde"
+  const sm = /(\d{1,3})\s*\)?\s*(?:\(\s*[a-z ]+\s*\))?\s*(?:is\s+)?gun(?:luk)?\s+(?:icinde|icerisinde|sure)/.exec(F)
+    || /\(\s*(\d{1,3})\s*\)\s*(?:is\s+)?gun\s+(?:icinde|icerisinde)/.exec(F);
+  if (sm) out.sureGun = +sm[1];
+  else { const w = /\b(kirk bes|on bes|yirmi|otuz|altmis|on|yedi|bes)\s+gun\s+(?:icinde|icerisinde)/.exec(F); if (w) out.sureGun = SAYI_GUN[w[1]]; }
+
+  // Muhatap: yazıdaki VKN/TCKN; dosyanınkiyle aynıysa mükellefin kendisi
+  const nums = [];
+  for (const l of lines) {
+    const f = fold(l);
+    if (/^sayi\b|iban|telefon|tel\s*:|faks|sicil/.test(f)) continue;
+    const m = /(?:vkn|tckn|v\.k\.n|vergi\s+kimlik\s+(?:no|numarasi)|t\.?c\.?\s+kimlik\s+(?:no|numarasi))[^0-9]{0,12}([\dOoIlBSZ|\- ]{10,16})/.exec(f);
+    if (m) { const n = idNumber(l.slice(m.index + m[0].length - m[1].length, m.index + m[0].length)); if (n) nums.push({ n, line: lines.indexOf(l) }); }
+  }
+  const benim = new Set([dosya.vkn, dosya.tckn].filter(Boolean));
+  const yabanci = nums.find(x => !benim.has(x.n));
+  if (yabanci) { out.muhatap = 'diger'; out.muhatapVkn = yabanci.n; }
+  else if (nums.length) out.muhatap = 'mukellef';
+  // Muhatap adı: VKN satırının üstündeki satır, "Sayın …", ya da konu satırından sonraki ilk büyük harfli satır
+  const adAday = l => { const c = clean(l.replace(/^sayın\s+/i, '').replace(/['’]?\s*(?:NE|NA|YE|YA)$/u, '').replace(/\(.*?(?:vkn|vergi).*?\)/i, '')); return hasWord(c) && c.length <= 120 && !/^(sayi|konu|ilgi|tarih|adres)/.test(fold(c)) ? c : ''; };
+  let ad = '';
+  if (yabanci || nums.length) {
+    const i = (yabanci || nums[0]).line;
+    const sameLine = adAday(lines[i].split(/\(|vkn|vergi kimlik/i)[0]);
+    ad = sameLine || (i > 0 ? adAday(lines[i - 1]) : '');
+  }
+  if (!ad) { const s = lines.find(l => /^say[ıi]n\s+\S/i.test(l)); if (s) ad = adAday(s); }
+  if (!ad) {
+    const k = lines.findIndex(l => /^konu\b/.test(fold(l)));
+    const c = lines.slice(k + 1, k + 6).find(l => isUpper(l) && /[A-ZÇĞİÖŞÜ]{2,}\s+[A-ZÇĞİÖŞÜ]{2,}/.test(l) && !/^(ilgi|t\.?c\.?|hazine)/.test(fold(l)));
+    if (c) ad = adAday(c);
+  }
+  if (ad && out.muhatap === 'diger') out.muhatapAd = ad;
+  if (!out.muhatap && ad) out.muhatapAdi = ad; // VKN yoksa yalnızca bilgi olarak
+  return out;
+}

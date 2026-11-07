@@ -1,7 +1,7 @@
 import * as db from './db.js';
 import * as cr from './crypto.js';
 import * as cloud from './cloud.js';
-import { extractText, parse } from './extract.js';
+import { extractText, parse, parseBilgi } from './extract.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 function defaultSettings() { return { autolock: 5, theme: 'sistem' }; }
@@ -516,7 +516,7 @@ function bilgiSonGun(b) {
   while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
   return ymd(d);
 }
-const bilgiMuhatap = (b, m) => b.muhatap === 'diger' ? (b.muhatapAd || 'Başka mükellef') : (m ? kisaAd(m) : 'Mükellef');
+const bilgiMuhatap = (b, m) => b.muhatap === 'diger' ? (b.muhatapAd ? kisaAd({ unvan: b.muhatapAd }) : 'Başka mükellef') : (m ? kisaAd(m) : 'Mükellef');
 function bilgiDurum(b) {
   if (b.cevapTarihi) return { cls: 'done', text: 'Cevaplandı' };
   if (!b.tebligTarihi) return { cls: 'wait', text: 'Tebliğ bekleniyor' };
@@ -838,6 +838,11 @@ function bilgiHTML(m) {
 function bilgiSheet(mid, b = null) {
   const v = b || { muhatap: 'mukellef', sureGun: 15, yaziTarihi: today() };
   const form = openSheet(b ? 'Bilgi isteme yazısı' : 'Yeni bilgi isteme yazısı', `
+    <div class="autofill">
+      <button type="button" class="btn primary block" data-bilgi-af>${I.doc} Yazıyı yükle, bilgileri doldur</button>
+      <p class="hint">Bilgi isteme yazısının PDF'ini ya da fotoğrafını seç. Sayı, tarih, konu, cevap süresi ve muhatap okunur; yazı saklanmaz. Tebliğ tarihini tebliğden sonra sen gir.</p>
+      <div class="af-status" aria-live="polite"></div>
+    </div>
     <div class="seg full" id="muhSeg">
       <button type="button" class="${v.muhatap !== 'diger' ? 'on' : ''}" data-m="mukellef">Mükellefe</button>
       <button type="button" class="${v.muhatap === 'diger' ? 'on' : ''}" data-m="diger">Başka mükellefe</button>
@@ -881,6 +886,43 @@ function bilgiSheet(mid, b = null) {
       : 'Tebliğ tarihini girince son cevap günü hesaplanır.';
   };
   e.tebligTarihi.addEventListener('input', bilgiGoster); e.sureGun.addEventListener('input', bilgiGoster); bilgiGoster();
+  // Yazıyı yükle: bilgileri yazıdan oku
+  const status = form.querySelector('.af-status');
+  const setMuhatap = v => seg.querySelector(`[data-m=${v}]`)?.click();
+  form.querySelector('[data-bilgi-af]').onclick = async ev => {
+    const btn = ev.currentTarget;
+    const files = await pickFiles('application/pdf,image/*');
+    if (!files.length) return;
+    btn.disabled = true;
+    try {
+      status.textContent = `${files[0].name}: okunuyor…`;
+      let text = '';
+      for (const f of files) {
+        try { text += '\n' + await extractText(f, msg => { status.textContent = `${f.name}: ${msg}`; }); } catch (err) { console.error(err); }
+      }
+      const m = S.items.get(mid) || {};
+      const r = parseBilgi(text, { vkn: m.vkn, tckn: m.tckn });
+      // VKN bulunamadıysa adı dosyadaki unvanla karşılaştır
+      if (!r.muhatap && r.muhatapAdi) {
+        const ilk = fold(String(m.unvan || '').split(/\s+/)[0] || '');
+        if (ilk && fold(r.muhatapAdi).includes(ilk)) r.muhatap = 'mukellef';
+        else { r.muhatap = 'diger'; r.muhatapAd = r.muhatapAdi; }
+      }
+      const doldur = (k, val) => { const el = e[k]; if (!el || val == null || val === '') return false; el.value = val; el.classList.add('filled'); el.addEventListener('input', () => el.classList.remove('filled'), { once: true }); return true; };
+      const bulunan = [];
+      if (r.muhatap) { setMuhatap(r.muhatap); bulunan.push(r.muhatap === 'diger' ? 'Muhatap: başka mükellef' : 'Muhatap: mükellefin kendisi'); }
+      if (doldur('muhatapAd', r.muhatapAd)) bulunan.push('Unvan');
+      if (doldur('muhatapVkn', r.muhatapVkn)) bulunan.push('VKN');
+      if (doldur('sayi', r.sayi)) bulunan.push('Sayı');
+      if (doldur('yaziTarihi', r.yaziTarihi)) bulunan.push('Tarih');
+      if (doldur('konu', r.konu)) bulunan.push('Konu');
+      if (doldur('sureGun', r.sureGun)) bulunan.push(`Süre (${r.sureGun} gün)`);
+      bilgiGoster();
+      status.innerHTML = bulunan.length
+        ? `<b>Bulunanlar:</b> ${esc(bulunan.join(', '))}<br><span class="muted">Sarı alanları yazıyla karşılaştır. Tebliğ tarihini tebliğden sonra gir.</span>`
+        : 'Yazıdan bilgi okunamadı; alanları elle doldurabilirsin. Örnek yazıyı Claude\'a gönderirsen okuma iyileştirilebilir.';
+    } finally { btn.disabled = false; }
+  };
 }
 
 /* ---------- görüşmeler ---------- */
