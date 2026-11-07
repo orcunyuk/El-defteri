@@ -509,12 +509,35 @@ function sureRow(href, title, sub, date) {
 }
 // Aktif dosyalardaki açık süreler ve inceleme bitiş süreleri
 /* ---------- bilgi isteme yazıları ---------- */
-// Son cevap günü: tebliğ + süre; hafta sonuna denk gelirse izleyen pazartesi (VUK 18). Resmî tatiller hesaba katılmaz.
+/* ---------- resmî tatiller (2394 sayılı Kanun) ---------- */
+const SABIT_TATIL = { '01-01': 'Yılbaşı', '04-23': 'Ulusal Egemenlik ve Çocuk Bayramı', '05-01': 'Emek ve Dayanışma Günü', '05-19': 'Atatürk\'ü Anma, Gençlik ve Spor Bayramı',
+  '07-15': 'Demokrasi ve Millî Birlik Günü', '08-30': 'Zafer Bayramı', '10-29': 'Cumhuriyet Bayramı' };
+// Dinî bayramların ilk günleri (Diyanet takvimi). Ramazan 3, Kurban 4 gün.
+const RAMAZAN = { 2024: '04-10', 2025: '03-30', 2026: '03-20', 2027: '03-09', 2028: '02-26', 2029: '02-14', 2030: '02-04' };
+const KURBAN = { 2024: '06-16', 2025: '06-06', 2026: '05-27', 2027: '05-16', 2028: '05-05', 2029: '04-24', 2030: '04-13' };
+const TATIL = (() => {
+  const t = {};
+  for (let y = 2024; y <= 2030; y++) {
+    for (const [md, ad] of Object.entries(SABIT_TATIL)) t[`${y}-${md}`] = ad;
+    const ekle = (bas, gun, ad) => { if (!bas) return; for (let i = 0; i < gun; i++) t[addDays(`${y}-${bas}`, i)] = `${ad} ${i + 1}. gün`;
+      t[addDays(`${y}-${bas}`, -1)] ??= `${ad} arifesi (yarım gün)`; };
+    ekle(RAMAZAN[y], 3, 'Ramazan Bayramı'); ekle(KURBAN[y], 4, 'Kurban Bayramı');
+    t[`${y}-10-28`] ??= 'Cumhuriyet Bayramı arifesi (yarım gün)';
+  }
+  return t;
+})();
+const tatilAdi = s => TATIL[s] || '';
+const tamTatil = s => !!TATIL[s] && !TATIL[s].includes('yarım gün');
+const haftaSonu = s => [0, 6].includes(parseD(s).getDay());
+// Sürenin son günü: tatile (hafta sonu ya da resmî tatil) rastlarsa izleyen ilk iş günü (VUK 18). Arife (yarım gün) kaydırmaz, uyarılır.
+function sonIsGunu(s) {
+  let d = s; const nedenler = [];
+  while (haftaSonu(d) || tamTatil(d)) { nedenler.push(tamTatil(d) ? tatilAdi(d).replace(/\s\d+\. gün$/, '') : 'hafta sonu'); d = addDays(d, 1); }
+  return { tarih: d, nedenler: [...new Set(nedenler)], arife: tatilAdi(d).includes('yarım gün') ? tatilAdi(d) : '' };
+}
 function bilgiSonGun(b) {
   if (!b.tebligTarihi) return '';
-  const d = parseD(addDays(b.tebligTarihi, +(b.sureGun || 15)));
-  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
-  return ymd(d);
+  return sonIsGunu(addDays(b.tebligTarihi, +(b.sureGun || 15))).tarih;
 }
 // E-tebligat: elektronik adrese ulaştığı tarihi izleyen 5. günün sonunda tebliğ edilmiş sayılır (VUK 107/A, Tebligat K. 7/a)
 const eTeblig = gonderim => gonderim ? addDays(gonderim, 5) : '';
@@ -908,13 +931,20 @@ function bilgiSheet(mid, b = null) {
   const gonderimEsitle = () => { if (!e.gonderimTarihi.dataset.elle) e.gonderimTarihi.value = e.yaziTarihi.value; bilgiGoster(); };
   e.gonderimTarihi.addEventListener('input', () => { e.gonderimTarihi.dataset.elle = '1'; bilgiGoster(); });
   e.yaziTarihi.addEventListener('input', gonderimEsitle);
+  const sonAciklama = (teb, sure) => {
+    const ham = addDays(teb, +(sure || 15)), r = sonIsGunu(ham);
+    let t = r.tarih !== ham ? `<br>${fmtD(ham)} tatile denk geldiği için (${r.nedenler.join(' ve ')}) izleyen ilk iş gününe kaydırıldı (VUK 18).` : '';
+    if (r.arife) t += `<br>⚠️ Son gün ${r.arife}: öğleden sonra tatil.`;
+    if (+parseD(ham).getFullYear() > 2030) t += '<br>2030 sonrası dinî bayramlar tabloda yok; kontrol et.';
+    return t;
+  };
   const bilgiGoster = () => {
     const ebt = e.tebligSekli.value === 'e';
     const teb = ebt ? eTeblig(e.gonderimTarihi.value) : e.tebligTarihi.value;
     const son = bilgiSonGun({ tebligTarihi: teb, sureGun: e.sureGun.value });
     const tn = teb ? daysUntil(teb) : 0;
     form.querySelector('#sonGunBilgi').innerHTML = son
-      ? `${ebt ? `<b>Tebliğ tarihi: ${fmtD(teb)}</b>${tn > 0 ? ` (${tn} gün sonra)` : ''} — gönderimi izleyen 5. günün sonu (VUK 107/A).<br>` : ''}<b>Son cevap günü: ${fmtD(son)}</b> (${relDays(daysUntil(son))}). Hafta sonuna denk gelirse izleyen iş günü alınır; resmî tatilleri kontrol et.`
+      ? `${ebt ? `<b>Tebliğ tarihi: ${fmtD(teb)}</b>${tn > 0 ? ` (${tn} gün sonra)` : ''} — gönderimi izleyen 5. günün sonu (VUK 107/A).<br>` : ''}<b>Son cevap günü: ${fmtD(son)}</b> (${relDays(daysUntil(son))}).${sonAciklama(teb, e.sureGun.value)}`
       : (ebt ? 'E-tebligat gönderim tarihini girince tebliğ tarihi ve son gün hesaplanır.' : 'Tebliğ tarihini girince son cevap günü hesaplanır.');
   };
   e.tebligTarihi.addEventListener('input', bilgiGoster); e.sureGun.addEventListener('input', bilgiGoster); bilgiGoster();
