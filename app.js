@@ -516,6 +516,8 @@ function bilgiSonGun(b) {
   while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
   return ymd(d);
 }
+// E-tebligat: elektronik adrese ulaştığı tarihi izleyen 5. günün sonunda tebliğ edilmiş sayılır (VUK 107/A, Tebligat K. 7/a)
+const eTeblig = gonderim => gonderim ? addDays(gonderim, 5) : '';
 const bilgiMuhatap = (b, m) => b.muhatap === 'diger' ? (b.muhatapAd ? kisaAd({ unvan: b.muhatapAd }) : 'Başka mükellef') : (m ? kisaAd(m) : 'Mükellef');
 function bilgiDurum(b) {
   if (b.cevapTarihi) return { cls: 'done', text: 'Cevaplandı' };
@@ -683,7 +685,9 @@ async function importPaket(obj) {
   for (const x of obj.bilgiIstemeleri || []) {
     if (byM('bilgi', item.id).some(y => y.sayi && y.sayi === x.sayi && y.muhatapAd === (x.muhatapAd || ''))) continue;
     await save({ id: uid(), kind: 'bilgi', mid: item.id, muhatap: x.muhatap === 'diger' ? 'diger' : 'mukellef', muhatapAd: x.muhatapAd || '', muhatapVkn: x.muhatapVkn || '',
-      sayi: x.sayi || '', yaziTarihi: x.yaziTarihi || '', konu: x.konu || '', tebligTarihi: x.tebligTarihi || '', sureGun: +x.sureGun || 15, cevapTarihi: x.cevapTarihi || '', cevapNot: x.cevapNot || '' });
+      sayi: x.sayi || '', yaziTarihi: x.yaziTarihi || '', konu: x.konu || '', sureGun: +x.sureGun || 15, cevapTarihi: x.cevapTarihi || '', cevapNot: x.cevapNot || '',
+      tebligSekli: x.tebligSekli === 'elden' ? 'elden' : 'e', gonderimTarihi: x.tebligSekli === 'elden' ? '' : (x.gonderimTarihi || x.yaziTarihi || ''),
+      tebligTarihi: x.tebligSekli === 'elden' ? (x.tebligTarihi || '') : eTeblig(x.gonderimTarihi || x.yaziTarihi || '') });
   }
   for (const k of obj.kayitlar || []) {
     if (byM('kayit', item.id).some(x => x.tarih === k.tarih && x.konu === (k.konu || ''))) continue;
@@ -825,7 +829,7 @@ function bilgiHTML(m) {
       ${b.konu ? `<p class="bcard-konu">${esc(b.konu)}</p>` : ''}
       <dl class="bcard-grid">
         <div><dt>Yazı</dt><dd>${esc([b.sayi, fmtD(b.yaziTarihi)].filter(Boolean).join(' · ') || '—')}</dd></div>
-        <div><dt>Tebliğ</dt><dd>${b.tebligTarihi ? fmtD(b.tebligTarihi) : '—'}</dd></div>
+        <div><dt>Tebliğ${b.tebligSekli === 'e' ? ' (e-tebligat)' : b.tebligSekli === 'elden' ? ' (elden/posta)' : ''}</dt><dd>${b.tebligTarihi ? fmtD(b.tebligTarihi) : '—'}</dd></div>
         <div><dt>Süre</dt><dd>${+(b.sureGun || 15)} gün</dd></div>
         <div><dt>Son gün</dt><dd>${son ? fmtD(son) : '—'}</dd></div>
         ${b.cevapTarihi ? `<div class="wide"><dt>Cevap</dt><dd>${fmtD(b.cevapTarihi)}${b.cevapNot ? ' · ' + esc(b.cevapNot) : ''}</dd></div>` : ''}
@@ -836,11 +840,12 @@ function bilgiHTML(m) {
     ${bs.length ? `<div class="bcards">${bs.map(kart).join('')}</div>` : '<p class="footnote">Mükellefe ya da başka mükelleflere yazdığın bilgi isteme yazılarını ekle; tebliğ tarihinden cevap süresi ve kalan gün hesaplanır.</p>'}`;
 }
 function bilgiSheet(mid, b = null) {
-  const v = b || { muhatap: 'mukellef', sureGun: 15, yaziTarihi: today() };
+  const v = b || { muhatap: 'mukellef', sureGun: 15, yaziTarihi: today(), tebligSekli: 'e' };
+  const sekli = v.tebligSekli || (v.tebligTarihi ? 'elden' : 'e');
   const form = openSheet(b ? 'Bilgi isteme yazısı' : 'Yeni bilgi isteme yazısı', `
     <div class="autofill">
       <button type="button" class="btn primary block" data-bilgi-af>${I.doc} Yazıyı yükle, bilgileri doldur</button>
-      <p class="hint">Bilgi isteme yazısının PDF'ini ya da fotoğrafını seç. Sayı, tarih, konu, cevap süresi ve muhatap okunur; yazı saklanmaz. Tebliğ tarihini tebliğden sonra sen gir.</p>
+      <p class="hint">Bilgi isteme yazısının PDF'ini ya da fotoğrafını seç. Sayı, tarih, konu, cevap süresi ve muhatap okunur; e-tebligatla tebliğ tarihi ve son gün kendiliğinden hesaplanır. Yazı saklanmaz.</p>
       <div class="af-status" aria-live="polite"></div>
     </div>
     <div class="seg full" id="muhSeg">
@@ -855,7 +860,16 @@ function bilgiSheet(mid, b = null) {
     </div>
     <div class="row2">${field('Yazı sayısı', 'sayi', v.sayi)}${field('Yazı tarihi', 'yaziTarihi', v.yaziTarihi, { type: 'date' })}</div>
     ${field('Konu', 'konu', v.konu, { placeholder: 'ör. 2024 yılı banka hesap hareketleri' })}
-    <div class="row2">${field('Tebliğ tarihi', 'tebligTarihi', v.tebligTarihi, { type: 'date' })}${field('Cevap süresi (gün)', 'sureGun', v.sureGun || 15, { type: 'number', inputmode: 'numeric', extra: 'min="1" max="365"' })}</div>
+    <div class="seg full" id="tebSeg">
+      <button type="button" class="${sekli === 'e' ? 'on' : ''}" data-t="e">E-tebligat</button>
+      <button type="button" class="${sekli === 'elden' ? 'on' : ''}" data-t="elden">Elden / posta</button>
+    </div>
+    <input type="hidden" name="tebligSekli" value="${sekli}">
+    <div class="row2">
+      <div id="eAlan"${sekli === 'e' ? '' : ' hidden'}>${field('E-tebligat gönderim', 'gonderimTarihi', v.gonderimTarihi || v.yaziTarihi, { type: 'date' })}</div>
+      <div id="elAlan"${sekli === 'elden' ? '' : ' hidden'}>${field('Tebliğ tarihi', 'tebligTarihi', sekli === 'elden' ? v.tebligTarihi : '', { type: 'date' })}</div>
+      ${field('Cevap süresi (gün)', 'sureGun', v.sureGun || 15, { type: 'number', inputmode: 'numeric', extra: 'min="1" max="365"' })}
+    </div>
     <p class="hint" id="sonGunBilgi"></p>
     <details class="takip"${v.cevapTarihi ? ' open' : ''}><summary>Cevap geldi</summary>
       ${field('Cevap tarihi', 'cevapTarihi', v.cevapTarihi, { type: 'date' })}
@@ -864,8 +878,9 @@ function bilgiSheet(mid, b = null) {
     ${b ? `<button type="button" class="btn block danger-text" data-act="delBilgi" data-id="${b.id}">Yazıyı sil</button>` : ''}`,
   { onSubmit: async (f, fd) => {
     const item = b ? { ...b } : { id: uid(), kind: 'bilgi', mid };
-    for (const k of ['muhatap', 'muhatapAd', 'muhatapVkn', 'sayi', 'yaziTarihi', 'konu', 'tebligTarihi', 'cevapTarihi', 'cevapNot']) item[k] = String(fd.get(k) ?? '').trim();
+    for (const k of ['muhatap', 'muhatapAd', 'muhatapVkn', 'sayi', 'yaziTarihi', 'konu', 'tebligSekli', 'gonderimTarihi', 'tebligTarihi', 'cevapTarihi', 'cevapNot']) item[k] = String(fd.get(k) ?? '').trim();
     item.sureGun = Math.max(1, parseInt(fd.get('sureGun'), 10) || 15);
+    if (item.tebligSekli === 'e') item.tebligTarihi = eTeblig(item.gonderimTarihi); else item.gonderimTarihi = '';
     if (item.muhatap !== 'diger') { item.muhatapAd = ''; item.muhatapVkn = ''; }
     else if (!item.muhatapAd) { toast('Muhatabın unvanını yaz'); return false; }
     await save(item);
@@ -879,11 +894,28 @@ function bilgiSheet(mid, b = null) {
     e.muhatap.value = btn.dataset.m;
     form.querySelector('#digerAlan').hidden = btn.dataset.m !== 'diger';
   };
+  // Tebliğ şekli: e-tebligat (otomatik) / elden-posta (elle)
+  const tebSeg = form.querySelector('#tebSeg');
+  tebSeg.onclick = ev => {
+    const btn = ev.target.closest('button[data-t]'); if (!btn) return;
+    tebSeg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === btn));
+    e.tebligSekli.value = btn.dataset.t;
+    form.querySelector('#eAlan').hidden = btn.dataset.t !== 'e';
+    form.querySelector('#elAlan').hidden = btn.dataset.t !== 'elden';
+    bilgiGoster();
+  };
+  // Gönderim tarihi elle değiştirilmedikçe yazı tarihini izler
+  const gonderimEsitle = () => { if (!e.gonderimTarihi.dataset.elle) e.gonderimTarihi.value = e.yaziTarihi.value; bilgiGoster(); };
+  e.gonderimTarihi.addEventListener('input', () => { e.gonderimTarihi.dataset.elle = '1'; bilgiGoster(); });
+  e.yaziTarihi.addEventListener('input', gonderimEsitle);
   const bilgiGoster = () => {
-    const son = bilgiSonGun({ tebligTarihi: e.tebligTarihi.value, sureGun: e.sureGun.value });
-    form.querySelector('#sonGunBilgi').textContent = son
-      ? `Son cevap günü: ${fmtD(son)} (${relDays(daysUntil(son))}). Hafta sonu ise izleyen iş gününe kaydırıldı; resmî tatilleri kontrol et.`
-      : 'Tebliğ tarihini girince son cevap günü hesaplanır.';
+    const ebt = e.tebligSekli.value === 'e';
+    const teb = ebt ? eTeblig(e.gonderimTarihi.value) : e.tebligTarihi.value;
+    const son = bilgiSonGun({ tebligTarihi: teb, sureGun: e.sureGun.value });
+    const tn = teb ? daysUntil(teb) : 0;
+    form.querySelector('#sonGunBilgi').innerHTML = son
+      ? `${ebt ? `<b>Tebliğ tarihi: ${fmtD(teb)}</b>${tn > 0 ? ` (${tn} gün sonra)` : ''} — gönderimi izleyen 5. günün sonu (VUK 107/A).<br>` : ''}<b>Son cevap günü: ${fmtD(son)}</b> (${relDays(daysUntil(son))}). Hafta sonuna denk gelirse izleyen iş günü alınır; resmî tatilleri kontrol et.`
+      : (ebt ? 'E-tebligat gönderim tarihini girince tebliğ tarihi ve son gün hesaplanır.' : 'Tebliğ tarihini girince son cevap günü hesaplanır.');
   };
   e.tebligTarihi.addEventListener('input', bilgiGoster); e.sureGun.addEventListener('input', bilgiGoster); bilgiGoster();
   // Yazıyı yükle: bilgileri yazıdan oku
@@ -914,12 +946,12 @@ function bilgiSheet(mid, b = null) {
       if (doldur('muhatapAd', r.muhatapAd)) bulunan.push('Unvan');
       if (doldur('muhatapVkn', r.muhatapVkn)) bulunan.push('VKN');
       if (doldur('sayi', r.sayi)) bulunan.push('Sayı');
-      if (doldur('yaziTarihi', r.yaziTarihi)) bulunan.push('Tarih');
+      if (doldur('yaziTarihi', r.yaziTarihi)) { bulunan.push('Tarih'); gonderimEsitle(); }
       if (doldur('konu', r.konu)) bulunan.push('Konu');
       if (doldur('sureGun', r.sureGun)) bulunan.push(`Süre (${r.sureGun} gün)`);
       bilgiGoster();
       status.innerHTML = bulunan.length
-        ? `<b>Bulunanlar:</b> ${esc(bulunan.join(', '))}<br><span class="muted">Sarı alanları yazıyla karşılaştır. Tebliğ tarihini tebliğden sonra gir.</span>`
+        ? `<b>Bulunanlar:</b> ${esc(bulunan.join(', '))}<br><span class="muted">Sarı alanları yazıyla karşılaştır. E-tebligat gönderim tarihi yazı tarihinden farklıysa düzelt.</span>`
         : 'Yazıdan bilgi okunamadı; alanları elle doldurabilirsin. Örnek yazıyı Claude\'a gönderirsen okuma iyileştirilebilir.';
     } finally { btn.disabled = false; }
   };

@@ -337,3 +337,6 @@ details.more .info-grid { margin-top: 10px; }
 .badge.wait { background: var(--fill); color: var(--accent); }
 #muhSeg { margin-bottom: 14px; }
 #muhSeg > * { padding: 8px 10px; font-size: 14px; }
+
+#tebSeg { margin: 4px 0 14px; }
+#tebSeg > * { padding: 8px 10px; font-size: 14px; }
