@@ -530,11 +530,23 @@ const tatilAdi = s => TATIL[s] || '';
 const tamTatil = s => !!TATIL[s] && !TATIL[s].includes('yarım gün');
 const haftaSonu = s => [0, 6].includes(parseD(s).getDay());
 // Sürenin son günü: tatile (hafta sonu ya da resmî tatil) rastlarsa izleyen ilk iş günü (VUK 18). Arife (yarım gün) kaydırmaz, uyarılır.
-function sonIsGunu(s) {
+// Mali tatil (5604 s. K.): 1–20 Temmuz. Bu aralıkta biten mükellef süreleri tatilin bitiminden itibaren 7 gün uzar (27 Temmuz).
+const MALI_TATIL_NEDEN = 'mali tatil: 1–20 Temmuz, 7 gün uzar — 5604 s. K.';
+function sonIsGunu(s, { mali = true } = {}) {
   let d = s; const nedenler = [];
+  if (mali && /-07-(0[1-9]|1\d|20)$/.test(d)) { d = d.slice(0, 5) + '07-27'; nedenler.push(MALI_TATIL_NEDEN); }
   while (haftaSonu(d) || tamTatil(d)) { nedenler.push(tamTatil(d) ? tatilAdi(d).replace(/\s\d+\. gün$/, '') : 'hafta sonu'); d = addDays(d, 1); }
   return { tarih: d, nedenler: [...new Set(nedenler)], arife: tatilAdi(d).includes('yarım gün') ? tatilAdi(d) : '' };
 }
+// Ekranda: "20 Kas → 23 Kas (hafta sonu)" gibi
+const etkinTarih = (s, o) => s ? sonIsGunu(s, o).tarih : '';
+function kaymaHTML(s, o) {
+  if (!s) return '';
+  const r = sonIsGunu(s, o);
+  return r.tarih === s ? fmtD(s) : `${fmtD(s)} → <b>${fmtD(r.tarih)}</b> <span class="kayma">(${esc(r.nedenler.join(' ve '))})</span>`;
+}
+const gorevSon = g => etkinTarih(g.tarih);
+const bitisSon = m => etkinTarih(m.bitisTarihi, { mali: false });
 function bilgiSonGun(b) {
   if (!b.tebligTarihi) return '';
   return sonIsGunu(addDays(b.tebligTarihi, +(b.sureGun || 15))).tarih;
@@ -552,8 +564,8 @@ function acikSureler() {
   const ms = all('mukellef').filter(isAktif);
   const ids = new Set(ms.map(m => m.id));
   return [
-    ...ms.filter(m => m.bitisTarihi).map(m => ({ d: m.bitisTarihi, href: `#/m/${m.id}/sureler`, title: 'İnceleme bitiş süresi', sub: `${kisaAd(m)} · ${fmtD(m.bitisTarihi)}`, m })),
-    ...all('gorev').filter(g => !g.bitti && ids.has(g.mid) && g.tarih).map(g => ({ d: g.tarih, href: `#/m/${g.mid}/sureler`, title: g.baslik, sub: `${S.items.get(g.mid) ? kisaAd(S.items.get(g.mid)) : ''} · ${fmtD(g.tarih)}`, g })),
+    ...ms.filter(m => m.bitisTarihi).map(m => ({ d: bitisSon(m), href: `#/m/${m.id}/sureler`, title: 'İnceleme bitiş süresi', sub: `${kisaAd(m)} · ${fmtD(bitisSon(m))}`, m })),
+    ...all('gorev').filter(g => !g.bitti && ids.has(g.mid) && g.tarih).map(g => ({ d: gorevSon(g), href: `#/m/${g.mid}/sureler`, title: g.baslik, sub: `${S.items.get(g.mid) ? kisaAd(S.items.get(g.mid)) : ''} · ${fmtD(gorevSon(g))}`, g })),
     ...all('bilgi').filter(b => !b.cevapTarihi && b.tebligTarihi && ids.has(b.mid)).map(b => {
       const m = S.items.get(b.mid), d = bilgiSonGun(b);
       const title = b.muhatap === 'diger' ? `Bilgi isteme cevabı: ${b.muhatapAd || 'karşıt'}` : 'Bilgi isteme cevabı';
@@ -639,7 +651,7 @@ function renderDetail(id) {
         ${box('Adı / Unvanı', m.unvan, { full: true, empty: true })}
         ${box('VKN', m.vkn, { empty: true })}${box('İnceleme yılı', m.donem, { empty: true })}
         ${box('Vergi dairesi', m.vergiDairesi, { empty: true })}${box('İnceleme', inc, { empty: true })}
-        ${m.bitisTarihi ? box('Bitiş süresi', `${esc(fmtD(m.bitisTarihi))} ${isAktif(m) ? badge(m.bitisTarihi) : ''}`, { raw: true, full: true }) : ''}
+        ${m.bitisTarihi ? box('Bitiş süresi', `<span>${kaymaHTML(m.bitisTarihi, { mali: false })}</span> ${isAktif(m) ? badge(bitisSon(m)) : ''}`, { raw: true, full: true }) : ''}
         ${isAktif(m) ? '' : box('Durum', 'Kapandı', { full: true })}
       </div>
       ${[m.tckn, m.isEmriNo, m.isEmriTarihi, m.baslamaTarihi, m.adres, m.faaliyet].some(Boolean) ? `<details class="more"><summary>Diğer bilgiler</summary><div class="info-grid">
@@ -933,7 +945,7 @@ function bilgiSheet(mid, b = null) {
   e.yaziTarihi.addEventListener('input', gonderimEsitle);
   const sonAciklama = (teb, sure) => {
     const ham = addDays(teb, +(sure || 15)), r = sonIsGunu(ham);
-    let t = r.tarih !== ham ? `<br>${fmtD(ham)} tatile denk geldiği için (${r.nedenler.join(' ve ')}) izleyen ilk iş gününe kaydırıldı (VUK 18).` : '';
+    let t = r.tarih !== ham ? `<br>${fmtD(ham)} → ${fmtD(r.tarih)} ileri alındı: ${r.nedenler.join(' ve ')}${r.nedenler.some(n => !n.startsWith('mali')) ? ' (VUK 18)' : ''}.` : '';
     if (r.arife) t += `<br>⚠️ Son gün ${r.arife}: öğleden sonra tatil.`;
     if (+parseD(ham).getFullYear() > 2030) t += '<br>2030 sonrası dinî bayramlar tabloda yok; kontrol et.';
     return t;
@@ -1109,15 +1121,15 @@ async function shareOrDownload(file) {
 /* ---------- süreler ---------- */
 function surelerHTML(m) {
   const gs = byM('gorev', m.id);
-  const open = gs.filter(g => !g.bitti).sort((a, b) => a.tarih.localeCompare(b.tarih));
+  const open = gs.filter(g => !g.bitti).sort((a, b) => gorevSon(a).localeCompare(gorevSon(b)));
   const done = gs.filter(g => g.bitti).sort((a, b) => b.tarih.localeCompare(a.tarih));
   const row = g => `<div class="row">
     <button class="check${g.bitti ? ' on' : ''}" data-act="toggleGorev" data-id="${g.id}" aria-label="Tamamlandı olarak işaretle">${g.bitti ? '✓' : ''}</button>
     <button class="row-main plain" data-act="editGorev" data-id="${g.id}">
       <div class="row-title wrap${g.bitti ? ' strike' : ''}">${esc(g.baslik)}</div>
-      <div class="row-sub">${fmtD(g.tarih)}${g.not ? ' · ' + esc(g.not) : ''}</div>
+      <div class="row-sub wrap">${kaymaHTML(g.tarih)}${g.not ? ' · ' + esc(g.not) : ''}</div>
     </button>
-    ${g.bitti ? '' : badge(g.tarih)}
+    ${g.bitti ? '' : badge(gorevSon(g))}
     ${g.bitti ? '' : `<button class="icon-btn" data-act="icsGorev" data-id="${g.id}" aria-label="Takvime ekle">${I.cal}</button>`}
   </div>`;
   return `<div class="sec-row"><h2 class="sec">Süreler</h2><button class="btn link sm" data-act="newGorev" data-mid="${m.id}">+ Ekle</button></div>
@@ -1129,7 +1141,8 @@ function gorevSheet(mid, g = null) {
   const form = openSheet(g ? 'Süreyi düzenle' : 'Yeni süre / görev', `
     ${field('Başlık', 'baslik', v.baslik, { required: true, extra: 'list="gorevList"' })}
     <datalist id="gorevList">${GOREV_SABLON.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
-    ${field('Tarih', 'tarih', v.tarih, { type: 'date', required: true })}
+    ${field('Son gün', 'tarih', v.tarih, { type: 'date', required: true })}
+    <p class="hint" id="gorevSonGun"></p>
     <div class="chips">${[7, 15, 30, 60].map(n => `<button type="button" class="chip" data-plus="${n}">Bugün +${n} gün</button>`).join('')}</div>
     ${textarea('Not', 'not', v.not, 3)}
     ${g ? `<button type="button" class="btn block danger-text" data-act="delGorev" data-id="${g.id}">Sil</button>` : ''}`,
@@ -1138,7 +1151,15 @@ function gorevSheet(mid, g = null) {
     Object.assign(item, { baslik: fd.get('baslik').trim(), tarih: fd.get('tarih'), not: fd.get('not').trim() });
     await save(item);
   } });
-  form.querySelector('.chips').onclick = e => { const n = e.target.dataset.plus; if (n) form.elements.tarih.value = addDays(today(), +n); };
+  const gosterSon = () => {
+    const t = form.elements.tarih.value, el = form.querySelector('#gorevSonGun');
+    if (!t) { el.textContent = 'Hafta sonu, resmî tatil ve mali tatile denk gelirse son gün kendiliğinden ileri alınır.'; return; }
+    const r = sonIsGunu(t);
+    el.innerHTML = r.tarih === t ? `Son gün: <b>${fmtD(t)}</b> (${relDays(daysUntil(t))}).${r.arife ? ` ⚠️ ${esc(r.arife)}.` : ''}`
+      : `${fmtD(t)} ileri alınır: ${esc(r.nedenler.join(' ve '))}. Geçerli son gün: <b>${fmtD(r.tarih)}</b> (${relDays(daysUntil(r.tarih))}).${r.arife ? ` ⚠️ ${esc(r.arife)}.` : ''}`;
+  };
+  form.elements.tarih.addEventListener('input', gosterSon); gosterSon();
+  form.querySelector('.chips').onclick = e => { const n = e.target.dataset.plus; if (n) { form.elements.tarih.value = addDays(today(), +n); gosterSon(); } };
 }
 function icsFile(uidStr, date, title) {
   const esc2 = s => s.replace(/[\\;,]/g, c => '\\' + c).replace(/\n/g, '\\n');
@@ -1365,8 +1386,8 @@ const ACT = {
     await removeItems([d.id]);
     closeSheet(); render();
   },
-  icsGorev: d => { const g = S.items.get(d.id); icsFile(g.id, g.tarih, `${dosyaEtiket(S.items.get(g.mid))}: ${g.baslik}`); },
-  icsBitis: d => { const m = S.items.get(d.mid); icsFile(m.id + '-bitis', m.bitisTarihi, `${dosyaEtiket(m)}: İnceleme bitiş süresi`); },
+  icsGorev: d => { const g = S.items.get(d.id); icsFile(g.id, gorevSon(g), `${dosyaEtiket(S.items.get(g.mid))}: ${g.baslik}`); },
+  icsBitis: d => { const m = S.items.get(d.mid); icsFile(m.id + '-bitis', bitisSon(m), `${dosyaEtiket(m)}: İnceleme bitiş süresi`); },
   exportBackup: async (d, el) => {
     el.disabled = true; el.textContent = 'Hazırlanıyor…';
     try {

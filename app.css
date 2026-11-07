@@ -340,3 +340,7 @@ details.more .info-grid { margin-top: 10px; }
 
 #tebSeg { margin: 4px 0 14px; }
 #tebSeg > * { padding: 8px 10px; font-size: 14px; }
+
+.kayma { color: var(--orange); font-size: 12px; }
+.row-sub.wrap { white-space: normal; }
+.ibox > b > span { display: inline; }
