@@ -599,6 +599,7 @@ function renderHome() {
   app.innerHTML = header('Dosyalar', { left: `<button class="nav-btn" data-act="lock">Kilitle</button>`, right: `<button class="nav-btn icon" data-act="newM" aria-label="Yeni dosya">${I.plus}</button>` }) +
     `<div class="page">
       <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan veya VKN ara" value="${esc(S.q)}"></label>
+      ${all('mukellef').length ? `<button class="btn block toplu-btn" data-act="topluBilgi">${I.doc} Bilgi isteme yazılarını yükle</button>` : ''}
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
       <div id="mlist"></div>
       ${alerts.length ? `<h2 class="sec">Yaklaşan süreler</h2><div class="box-grid">${alerts.map(sureBox).join('')}</div>` : ''}
@@ -877,6 +878,85 @@ function bilgiHTML(m) {
   return `<div class="sec-row"><h2 class="sec">Bilgi isteme yazıları</h2><button class="btn link sm" data-act="newBilgi" data-mid="${m.id}">+ Ekle</button></div>
     ${bs.length ? `<div class="bcards">${bs.map(kart).join('')}</div>` : '<p class="footnote">Mükellefe ya da başka mükelleflere yazdığın bilgi isteme yazılarını ekle; tebliğ tarihinden cevap süresi ve kalan gün hesaplanır.</p>'}`;
 }
+/* ---------- toplu yazı yükleme: her yazıyı ilgili mükellefin dosyasına kaydet ---------- */
+// Yazıdaki 10/11 haneli numaralar (araya "-", nokta ya da boşluk girmiş olabilir)
+function yaziNumaralari(text) {
+  const out = new Set();
+  for (const m of text.matchAll(/\d(?:[\s.-]?\d){9,10}(?!\d)/g)) { const d = m[0].replace(/\D/g, ''); if (d.length === 10 || d.length === 11) out.add(d); }
+  return out;
+}
+// Unvanın ayırt edici kısmı (ör. "Örnek Gıda Tarım ... Ltd. Şti." → "ornek gida")
+const adAnahtar = m => TR_FOLD(kisaAd(m).replace(/\s+(Ltd\. Şti\.|A\.Ş\.|Koll\. Şti\.|Kom\. Şti\.|Koop\.)$/i, '')).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+function mukellefBul(text) {
+  const F = ' ' + TR_FOLD(text).replace(/[^a-z0-9 \n]/g, ' ').replace(/\s+/g, ' ') + ' ';
+  const nums = yaziNumaralari(text);
+  // "nezdinde ... inceleme yapılmakta olan X ile ilgili" → incelenen mükellef X
+  const i = F.search(/nezdinde|incelemesi yapilmakta olan|incelemesi yurutulen|hakkinda yurutulen/);
+  const pencere = i >= 0 ? F.slice(Math.max(0, i - 120), i + 260) : '';
+  const puanlar = all('mukellef').map(m => {
+    let p = 0;
+    if (m.vkn && nums.has(m.vkn)) p += 10;
+    if (m.tckn && nums.has(m.tckn)) p += 10;
+    const ad = adAnahtar(m);
+    if (ad.length >= 3 && F.includes(' ' + ad + ' ')) p += 5;
+    if (ad.length >= 3 && pencere.includes(' ' + ad + ' ')) p += 15; // incelenen mükellef olarak geçiyor
+    return { m, p };
+  }).sort((a, b) => b.p - a.p);
+  const [ilk, ikinci] = puanlar;
+  return ilk && ilk.p >= 5 && (!ikinci || ilk.p > ikinci.p) ? ilk.m : null;
+}
+async function topluBilgiFlow() {
+  const files = await pickFiles('application/pdf,image/*');
+  if (!files.length) return;
+  const sonuc = [];
+  openSheet('Yazılar okunuyor', `<p class="muted" id="topluDurum">Hazırlanıyor…</p><p class="hint">Yazılar telefonun içinde okunuyor; hiçbir yere gönderilmiyor ve saklanmıyor.</p>`);
+  for (const [n, f] of files.entries()) {
+    const el = $('#topluDurum'); if (el) el.textContent = `${n + 1}/${files.length} · ${f.name}`;
+    let text = '';
+    try { text = await extractText(f, msg => { const e2 = $('#topluDurum'); if (e2) e2.textContent = `${n + 1}/${files.length} · ${f.name}: ${msg}`; }); } catch (err) { console.error(err); }
+    const m = text.trim() ? mukellefBul(text) : null;
+    const r = parseBilgi(text, m ? { vkn: m.vkn, tckn: m.tckn } : {});
+    if (m && !r.muhatap) r.muhatap = 'mukellef';
+    if (r.muhatap === 'mukellef') { delete r.muhatapAd; delete r.muhatapVkn; }
+    const kayitli = m && r.sayi && byM('bilgi', m.id).some(x => x.sayi === r.sayi);
+    sonuc.push({ ad: f.name, okundu: !!text.trim(), m, r, kayitli, text });
+  }
+  const ms = all('mukellef').sort((a, b) => coll.compare(kisaAd(a), kisaAd(b)));
+  const satir = (x, i) => {
+    const etiket = !x.okundu ? ['bad', 'Okunamadı'] : x.kayitli ? ['done', 'Zaten kayıtlı'] : x.m ? ['ok', 'Eşleşti'] : ['warn', 'Dosya seç'];
+    const muh = x.r.muhatap === 'diger' ? `Karşıt: ${x.r.muhatapAd ? kisaAd({ unvan: x.r.muhatapAd }) : 'başka mükellef'}${x.r.muhatapVkn ? ' (' + x.r.muhatapVkn + ')' : ''}` : 'Mükellefe';
+    return `<div class="tyazi">
+      <div class="ty-head"><b>${esc(x.ad)}</b><span class="badge ${etiket[0]}">${etiket[1]}</span></div>
+      <label class="fld"><span>Kaydedilecek dosya</span><select name="t${i}">
+        <option value="">— Atla —</option>
+        ${ms.map(m => `<option value="${m.id}"${x.m?.id === m.id && !x.kayitli ? ' selected' : ''}>${esc(kisaAd(m))}${m.vkn ? ' · ' + m.vkn : ''}</option>`).join('')}
+      </select></label>
+      ${x.okundu ? `<p class="ty-sub">${esc([muh, x.r.sayi, x.r.yaziTarihi && fmtD(x.r.yaziTarihi), x.r.sureGun && x.r.sureGun + ' gün'].filter(Boolean).join(' · '))}${x.r.konu ? `<br>${esc(x.r.konu)}` : ''}</p>` : '<p class="ty-sub">Bu dosyadan yazı okunamadı.</p>'}
+    </div>`;
+  };
+  const eslesen = sonuc.filter(x => x.m && !x.kayitli).length;
+  openSheet('Yazıları kaydet', `
+    <p class="card">${sonuc.length} yazı okundu. <b>${eslesen}</b> tanesi bir dosyayla eşleşti${sonuc.length - eslesen ? `; ${sonuc.length - eslesen} tanesi için dosya seç ya da atla` : ''}. Tebliğ tarihleri e-tebligat kuralına göre hesaplanır (gönderim = yazı tarihi).</p>
+    ${sonuc.map(satir).join('')}`,
+  { submitLabel: 'Kaydet', onSubmit: async (f, fd) => {
+    let n = 0;
+    for (const [i, x] of sonuc.entries()) {
+      const mid = fd.get('t' + i);
+      if (!mid || !x.okundu) continue;
+      const m = S.items.get(mid);
+      // Seçilen dosya otomatik eşleşmeden farklıysa muhatabı o dosyaya göre yeniden belirle
+      const r = (x.m?.id === mid) ? x.r : parseBilgi(x.text, { vkn: m.vkn, tckn: m.tckn });
+      const karsit = r.muhatap === 'diger' && r.muhatapVkn && r.muhatapVkn !== m.vkn && r.muhatapVkn !== m.tckn;
+      const gonderim = r.yaziTarihi || today();
+      await save({ id: uid(), kind: 'bilgi', mid, muhatap: karsit ? 'diger' : 'mukellef', muhatapAd: karsit ? (r.muhatapAd || '') : '', muhatapVkn: karsit ? r.muhatapVkn : '',
+        sayi: r.sayi || '', yaziTarihi: r.yaziTarihi || '', konu: r.konu || '', sureGun: r.sureGun || 15, cevapTarihi: '', cevapNot: '',
+        tebligSekli: 'e', gonderimTarihi: gonderim, tebligTarihi: eTeblig(gonderim) });
+      n++;
+    }
+    toast(`${n} yazı ilgili dosyalara kaydedildi`);
+  } });
+}
+
 function bilgiSheet(mid, b = null) {
   const v = b || { muhatap: 'mukellef', sureGun: 15, yaziTarihi: today(), tebligSekli: 'e' };
   const sekli = v.tebligSekli || (v.tebligTarihi ? 'elden' : 'e');
@@ -1381,6 +1461,7 @@ const ACT = {
   play: async (d, el) => playInto(el.parentElement, await loadFile(d.file, d.mime)),
   newGorev: d => gorevSheet(d.mid),
   newBilgi: d => bilgiSheet(d.mid),
+  topluBilgi: () => topluBilgiFlow(),
   editBilgi: d => { const b = S.items.get(d.id); bilgiSheet(b.mid, b); },
   delBilgi: async d => {
     if (!confirm('Bu bilgi isteme yazısı silinsin mi?')) return;

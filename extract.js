@@ -232,7 +232,8 @@ function idNumber(raw) {
     const d = s.replace(/\D/g, '');
     if (validVKN(d)) return d;
     if (validTCKN(d)) return d;
-    if (d.length === 11 || d.length === 12) for (let i = 0; i < d.length; i++) {
+    // Yalnızca 12 hane okunduysa (OCR fazladan karakter eklemiş) bir hane atarak kontrol hanesi tutan numarayı ara
+    if (d.length === 12) for (let i = 0; i < d.length; i++) {
       const c = d.slice(0, i) + d.slice(i + 1);
       if (c.length === 10 && validVKN(c)) return c;
       if (c.length === 11 && validTCKN(c)) return c;
@@ -453,7 +454,7 @@ export function parseBilgi(text, dosya = {}) {
   if (yabanci) { out.muhatap = 'diger'; out.muhatapVkn = yabanci.n; }
   else if (nums.length) out.muhatap = 'mukellef';
   // Muhatap adı: VKN satırının üstündeki satır, "Sayın …", ya da konu satırından sonraki ilk büyük harfli satır
-  const adAday = l => { const c = clean(l.replace(/^sayın\s+/i, '').replace(/['’]?\s*(?:NE|NA|YE|YA)$/u, '').replace(/\(.*?(?:vkn|vergi).*?\)/i, '')); return hasWord(c) && c.length <= 120 && !/^(sayi|konu|ilgi|tarih|adres)/.test(fold(c)) ? c : ''; };
+  const adAday = l => { const c = clean(l.replace(/^sayın\s+/i, '').replace(/(?:['’]|\.)\s*(?:NE|NA|YE|YA)$/u, '').replace(/\(.*?(?:vkn|vergi).*?\)/i, '')); return hasWord(c) && c.length <= 120 && !/^(sayi|konu|ilgi|tarih|adres)/.test(fold(c)) ? c : ''; };
   let ad = '';
   if (yabanci || nums.length) {
     const i = (yabanci || nums[0]).line;
