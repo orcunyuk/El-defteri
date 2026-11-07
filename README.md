@@ -4,6 +4,7 @@ Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
 
 - **Görünüm:** iPhone (iOS) tasarımı. Büyük başlıklar, gruplu listeler ve alt sekme çubuğu var (Dosyalar · Süreler · Ayarlar). Açık, koyu ya da sistem teması Ayarlar → Görünüm'den seçilir.
 - **Belgeden doldurma:** İş emri, beyanname, yoklama fişi (PDF, taranmış belge ya da ekran görüntüsü) seçilince künye bilgileri ve telefonlar doldurulur. Okuma cihazda yapılır (PDF.js, Türkçe Tesseract OCR); belgeler saklanmaz.
+- **Bilgi isteme yazıları:** Mükellefe ya da başka mükelleflere (karşıt) yazılan yazılar dosyada tutulur: sayı, tarih, konu, tebliğ tarihi, cevap süresi (varsayılan 15 gün), son cevap günü (hafta sonu ise izleyen iş günü; resmî tatiller hesaba katılmaz), kalan gün ve cevap durumu. Yaklaşan son günler ana sayfada ve Süreler sekmesinde görünür.
 - **Mükellef dosyaları:** Unvan, VKN, vergi dairesi, inceleme türü ve dönemi, iş emri bilgileri, başlama ve bitiş süresi (VUK 140'a göre öneri), adres ve kişiler (tek dokunuşla arama ya da e-posta).
 - **Görüşme günlüğü:** Tarih, tür, görüşülen kişi, konu, yazılı not ve sesli not. Not alırken isteğe bağlı takip süresi de eklenebilir. Uygulamadan bir kişi arandığında, uygulamaya dönünce “görüşmeni not al” hatırlatması çıkar.
 - **Süreler:** Görev ve süre listesi. Ana sayfada son 7 gün kalan süreler ve son 30 gün kalan inceleme bitişleri görünür. Süreler alarmlı olarak iPhone Takvimi'ne (.ics) eklenebilir.
@@ -23,6 +24,8 @@ Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
   "kisiler":  [{ "ad": "", "rol": "", "tel": "", "eposta": "" }],
   "kayitlar": [{ "tarih": "YYYY-AA-GGTSS:DD", "tur": "telefon|yuzyuze|yazi|eposta|diger", "kisi": "", "konu": "", "metin": "" }],
   "gorevler": [{ "baslik": "", "tarih": "YYYY-AA-GG", "not": "" }],
+  "bilgiIstemeleri": [{ "muhatap": "mukellef|diger", "muhatapAd": "", "muhatapVkn": "", "sayi": "", "yaziTarihi": "YYYY-AA-GG",
+                        "konu": "", "tebligTarihi": "YYYY-AA-GG", "sureGun": 15, "cevapTarihi": "", "cevapNot": "" }],
   "belgeler": [{ "ad": "dosya.pdf", "tur": "İş emri|Beyanname|Yoklama fişi|Tutanak|Yazışma / tebligat|Defter / kayıt|Fatura / banka|Diğer",
                  "aciklama": "", "mime": "application/pdf", "data": "<base64>" }]
 }

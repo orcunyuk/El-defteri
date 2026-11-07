@@ -508,18 +508,38 @@ function sureRow(href, title, sub, date) {
   return `<a class="row" href="${href}"><span class="row-ico ${tone}">${I.clock}</span><div class="row-main"><div class="row-title">${esc(title)}</div><div class="row-sub">${esc(sub)}</div></div>${badge(date)}</a>`;
 }
 // Aktif dosyalardaki açık süreler ve inceleme bitiş süreleri
+/* ---------- bilgi isteme yazıları ---------- */
+// Son cevap günü: tebliğ + süre; hafta sonuna denk gelirse izleyen pazartesi (VUK 18). Resmî tatiller hesaba katılmaz.
+function bilgiSonGun(b) {
+  if (!b.tebligTarihi) return '';
+  const d = parseD(addDays(b.tebligTarihi, +(b.sureGun || 15)));
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return ymd(d);
+}
+const bilgiMuhatap = (b, m) => b.muhatap === 'diger' ? (b.muhatapAd || 'Başka mükellef') : (m ? kisaAd(m) : 'Mükellef');
+function bilgiDurum(b) {
+  if (b.cevapTarihi) return { cls: 'done', text: 'Cevaplandı' };
+  if (!b.tebligTarihi) return { cls: 'wait', text: 'Tebliğ bekleniyor' };
+  const n = daysUntil(bilgiSonGun(b));
+  return { cls: n < 0 ? 'bad' : n <= 3 ? 'warn' : 'ok', text: relDays(n) };
+}
 function acikSureler() {
   const ms = all('mukellef').filter(isAktif);
   const ids = new Set(ms.map(m => m.id));
   return [
     ...ms.filter(m => m.bitisTarihi).map(m => ({ d: m.bitisTarihi, href: `#/m/${m.id}/sureler`, title: 'İnceleme bitiş süresi', sub: `${kisaAd(m)} · ${fmtD(m.bitisTarihi)}`, m })),
     ...all('gorev').filter(g => !g.bitti && ids.has(g.mid) && g.tarih).map(g => ({ d: g.tarih, href: `#/m/${g.mid}/sureler`, title: g.baslik, sub: `${S.items.get(g.mid) ? kisaAd(S.items.get(g.mid)) : ''} · ${fmtD(g.tarih)}`, g })),
+    ...all('bilgi').filter(b => !b.cevapTarihi && b.tebligTarihi && ids.has(b.mid)).map(b => {
+      const m = S.items.get(b.mid), d = bilgiSonGun(b);
+      const title = b.muhatap === 'diger' ? `Bilgi isteme cevabı: ${b.muhatapAd || 'karşıt'}` : 'Bilgi isteme cevabı';
+      return { d, href: `#/m/${b.mid}`, title, sub: `${m ? kisaAd(m) : ''} · ${fmtD(d)}`, mid: b.mid, b };
+    }),
   ].sort((a, b) => a.d.localeCompare(b.d));
 }
 function sureBox(a) {
   const n = daysUntil(a.d);
   const tone = n < 0 ? 'red' : n <= 3 ? 'orange' : 'green';
-  const mm = a.m || S.items.get(a.g?.mid);
+  const mm = a.m || S.items.get(a.g?.mid || a.mid);
   const unvan = mm ? kisaAd(mm) : '';
   return `<a class="sbox ${tone}" href="${a.href}">
     <span class="sbox-badge">${relDays(n)}</span>
@@ -614,6 +634,8 @@ function renderDetail(id) {
         </div>`).join('')}</div>`
         : `<div class="list"><button class="row action" data-act="kisi" data-mid="${id}">Telefon / kişi ekle</button></div>`}
 
+      ${bilgiHTML(m)}
+
       ${surelerHTML(m)}
 
       <h2 class="sec">Görüşme notları</h2>
@@ -657,6 +679,11 @@ async function importPaket(obj) {
     if (!g.baslik || !g.tarih || byM('gorev', item.id).some(x => x.baslik === g.baslik && x.tarih === g.tarih)) continue;
     await save({ id: uid(), kind: 'gorev', mid: item.id, baslik: g.baslik, tarih: g.tarih, not: g.not || '', bitti: false });
     n.gorev++;
+  }
+  for (const x of obj.bilgiIstemeleri || []) {
+    if (byM('bilgi', item.id).some(y => y.sayi && y.sayi === x.sayi && y.muhatapAd === (x.muhatapAd || ''))) continue;
+    await save({ id: uid(), kind: 'bilgi', mid: item.id, muhatap: x.muhatap === 'diger' ? 'diger' : 'mukellef', muhatapAd: x.muhatapAd || '', muhatapVkn: x.muhatapVkn || '',
+      sayi: x.sayi || '', yaziTarihi: x.yaziTarihi || '', konu: x.konu || '', tebligTarihi: x.tebligTarihi || '', sureGun: +x.sureGun || 15, cevapTarihi: x.cevapTarihi || '', cevapNot: x.cevapNot || '' });
   }
   for (const k of obj.kayitlar || []) {
     if (byM('kayit', item.id).some(x => x.tarih === k.tarih && x.konu === (k.konu || ''))) continue;
@@ -784,6 +811,76 @@ function kisiSheet(mid, kid) {
     if (i >= 0) item.kisiler[i] = data; else item.kisiler.push(data);
     await save(item);
   } });
+}
+
+function bilgiHTML(m) {
+  const bs = byM('bilgi', m.id).sort((a, b) => (!!a.cevapTarihi - !!b.cevapTarihi) || (bilgiSonGun(a) || '9').localeCompare(bilgiSonGun(b) || '9'));
+  const kart = b => {
+    const st = bilgiDurum(b), son = bilgiSonGun(b);
+    return `<button class="bcard${b.cevapTarihi ? ' cevapli' : ''}" data-act="editBilgi" data-id="${b.id}">
+      <div class="bcard-head">
+        <div><b>${esc(bilgiMuhatap(b, m))}</b>${b.muhatap === 'diger' && b.muhatapVkn ? `<span>VKN ${esc(b.muhatapVkn)}</span>` : b.muhatap === 'diger' ? '<span>Başka mükellef</span>' : '<span>Mükellefin kendisi</span>'}</div>
+        <span class="badge ${st.cls}">${esc(st.text)}</span>
+      </div>
+      ${b.konu ? `<p class="bcard-konu">${esc(b.konu)}</p>` : ''}
+      <dl class="bcard-grid">
+        <div><dt>Yazı</dt><dd>${esc([b.sayi, fmtD(b.yaziTarihi)].filter(Boolean).join(' · ') || '—')}</dd></div>
+        <div><dt>Tebliğ</dt><dd>${b.tebligTarihi ? fmtD(b.tebligTarihi) : '—'}</dd></div>
+        <div><dt>Süre</dt><dd>${+(b.sureGun || 15)} gün</dd></div>
+        <div><dt>Son gün</dt><dd>${son ? fmtD(son) : '—'}</dd></div>
+        ${b.cevapTarihi ? `<div class="wide"><dt>Cevap</dt><dd>${fmtD(b.cevapTarihi)}${b.cevapNot ? ' · ' + esc(b.cevapNot) : ''}</dd></div>` : ''}
+      </dl>
+    </button>`;
+  };
+  return `<div class="sec-row"><h2 class="sec">Bilgi isteme yazıları</h2><button class="btn link sm" data-act="newBilgi" data-mid="${m.id}">+ Ekle</button></div>
+    ${bs.length ? `<div class="bcards">${bs.map(kart).join('')}</div>` : '<p class="footnote">Mükellefe ya da başka mükelleflere yazdığın bilgi isteme yazılarını ekle; tebliğ tarihinden cevap süresi ve kalan gün hesaplanır.</p>'}`;
+}
+function bilgiSheet(mid, b = null) {
+  const v = b || { muhatap: 'mukellef', sureGun: 15, yaziTarihi: today() };
+  const form = openSheet(b ? 'Bilgi isteme yazısı' : 'Yeni bilgi isteme yazısı', `
+    <div class="seg full" id="muhSeg">
+      <button type="button" class="${v.muhatap !== 'diger' ? 'on' : ''}" data-m="mukellef">Mükellefe</button>
+      <button type="button" class="${v.muhatap === 'diger' ? 'on' : ''}" data-m="diger">Başka mükellefe</button>
+    </div>
+    <input type="hidden" name="muhatap" value="${v.muhatap === 'diger' ? 'diger' : 'mukellef'}">
+    <div id="digerAlan" ${v.muhatap === 'diger' ? '' : 'hidden'}>
+      <p class="hint">İncelemeyle ilgili başka bir mükellefe (karşıt) yazılan yazı.</p>
+      ${field('Muhatap unvanı / adı', 'muhatapAd', v.muhatapAd)}
+      ${field('Muhatap VKN / TCKN', 'muhatapVkn', v.muhatapVkn, { inputmode: 'numeric' })}
+    </div>
+    <div class="row2">${field('Yazı sayısı', 'sayi', v.sayi)}${field('Yazı tarihi', 'yaziTarihi', v.yaziTarihi, { type: 'date' })}</div>
+    ${field('Konu', 'konu', v.konu, { placeholder: 'ör. 2024 yılı banka hesap hareketleri' })}
+    <div class="row2">${field('Tebliğ tarihi', 'tebligTarihi', v.tebligTarihi, { type: 'date' })}${field('Cevap süresi (gün)', 'sureGun', v.sureGun || 15, { type: 'number', inputmode: 'numeric', extra: 'min="1" max="365"' })}</div>
+    <p class="hint" id="sonGunBilgi"></p>
+    <details class="takip"${v.cevapTarihi ? ' open' : ''}><summary>Cevap geldi</summary>
+      ${field('Cevap tarihi', 'cevapTarihi', v.cevapTarihi, { type: 'date' })}
+      ${textarea('Cevap notu', 'cevapNot', v.cevapNot, 2, { placeholder: 'ör. Ekstreler e-posta ile gönderildi' })}
+    </details>
+    ${b ? `<button type="button" class="btn block danger-text" data-act="delBilgi" data-id="${b.id}">Yazıyı sil</button>` : ''}`,
+  { onSubmit: async (f, fd) => {
+    const item = b ? { ...b } : { id: uid(), kind: 'bilgi', mid };
+    for (const k of ['muhatap', 'muhatapAd', 'muhatapVkn', 'sayi', 'yaziTarihi', 'konu', 'tebligTarihi', 'cevapTarihi', 'cevapNot']) item[k] = String(fd.get(k) ?? '').trim();
+    item.sureGun = Math.max(1, parseInt(fd.get('sureGun'), 10) || 15);
+    if (item.muhatap !== 'diger') { item.muhatapAd = ''; item.muhatapVkn = ''; }
+    else if (!item.muhatapAd) { toast('Muhatabın unvanını yaz'); return false; }
+    await save(item);
+    toast('Kaydedildi');
+  } });
+  const e = form.elements;
+  const seg = form.querySelector('#muhSeg');
+  seg.onclick = ev => {
+    const btn = ev.target.closest('button[data-m]'); if (!btn) return;
+    seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === btn));
+    e.muhatap.value = btn.dataset.m;
+    form.querySelector('#digerAlan').hidden = btn.dataset.m !== 'diger';
+  };
+  const bilgiGoster = () => {
+    const son = bilgiSonGun({ tebligTarihi: e.tebligTarihi.value, sureGun: e.sureGun.value });
+    form.querySelector('#sonGunBilgi').textContent = son
+      ? `Son cevap günü: ${fmtD(son)} (${relDays(daysUntil(son))}). Hafta sonu ise izleyen iş gününe kaydırıldı; resmî tatilleri kontrol et.`
+      : 'Tebliğ tarihini girince son cevap günü hesaplanır.';
+  };
+  e.tebligTarihi.addEventListener('input', bilgiGoster); e.sureGun.addEventListener('input', bilgiGoster); bilgiGoster();
 }
 
 /* ---------- görüşmeler ---------- */
@@ -1122,7 +1219,7 @@ const ACT = {
   toggleDurum: async d => { const m = S.items.get(d.id); await save({ ...m, durum: isAktif(m) ? 'kapandi' : 'aktif' }); render(); },
   delM: async d => {
     const m = S.items.get(d.id);
-    if (!confirm(`“${m.unvan}” dosyası ve içindeki tüm notlar, ses kayıtları ve süreler silinsin mi? Bu işlem geri alınamaz.`)) return;
+    if (!confirm(`“${m.unvan}” dosyası ve içindeki tüm notlar, ses kayıtları, bilgi isteme yazıları ve süreler silinsin mi? Bu işlem geri alınamaz.`)) return;
     const kids = [...S.items.values()].filter(i => i.mid === m.id);
     const fileIds = kids.flatMap(i => i.kind === 'belge' ? [i.fileId] : i.kind === 'kayit' ? (i.sesler || []).map(s => s.fileId) : []);
     await removeItems([m.id, ...kids.map(i => i.id)], fileIds);
@@ -1150,6 +1247,13 @@ const ACT = {
   },
   play: async (d, el) => playInto(el.parentElement, await loadFile(d.file, d.mime)),
   newGorev: d => gorevSheet(d.mid),
+  newBilgi: d => bilgiSheet(d.mid),
+  editBilgi: d => { const b = S.items.get(d.id); bilgiSheet(b.mid, b); },
+  delBilgi: async d => {
+    if (!confirm('Bu bilgi isteme yazısı silinsin mi?')) return;
+    await removeItems([d.id]);
+    closeSheet(); render();
+  },
   editGorev: d => { const g = S.items.get(d.id); gorevSheet(g.mid, g); },
   toggleGorev: async d => { const g = S.items.get(d.id); await save({ ...g, bitti: !g.bitti }); render(); },
   delGorev: async d => {
