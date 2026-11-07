@@ -531,7 +531,7 @@ const tamTatil = s => !!TATIL[s] && !TATIL[s].includes('yarım gün');
 const haftaSonu = s => [0, 6].includes(parseD(s).getDay());
 // Sürenin son günü: tatile (hafta sonu ya da resmî tatil) rastlarsa izleyen ilk iş günü (VUK 18). Arife (yarım gün) kaydırmaz, uyarılır.
 // Mali tatil (5604 s. K.): 1–20 Temmuz. Bu aralıkta biten mükellef süreleri tatilin bitiminden itibaren 7 gün uzar (27 Temmuz).
-const MALI_TATIL_NEDEN = 'mali tatil: 1–20 Temmuz, 7 gün uzar — 5604 s. K.';
+const MALI_TATIL_NEDEN = 'mali tatil: 1–20 Temmuz, 7 gün uzar (5604 sayılı Kanun)';
 function sonIsGunu(s, { mali = true } = {}) {
   let d = s; const nedenler = [];
   if (mali && /-07-(0[1-9]|1\d|20)$/.test(d)) { d = d.slice(0, 5) + '07-27'; nedenler.push(MALI_TATIL_NEDEN); }
@@ -545,7 +545,10 @@ function kaymaHTML(s, o) {
   const r = sonIsGunu(s, o);
   return r.tarih === s ? fmtD(s) : `${fmtD(s)} → <b>${fmtD(r.tarih)}</b> <span class="kayma">(${esc(r.nedenler.join(' ve '))})</span>`;
 }
-const gorevSon = g => etkinTarih(g.tarih);
+// Mali tatil yalnızca mükellef / meslek mensubu sürelerine uygulanır; idarenin (müfettişin) işlerine uygulanmaz
+const MUKELLEF_SURESI = /ibraz|cevap|bilgi\s*iste|ek\s*sure|itiraz|izah|uzlasma|beyan|odeme|duzelt|savunma|yoklama\s*daveti|davet/;
+const gorevMali = g => typeof g.mali === 'boolean' ? g.mali : MUKELLEF_SURESI.test(TR_FOLD(g.baslik || ''));
+const gorevSon = g => etkinTarih(g.tarih, { mali: gorevMali(g) });
 const bitisSon = m => etkinTarih(m.bitisTarihi, { mali: false });
 function bilgiSonGun(b) {
   if (!b.tebligTarihi) return '';
@@ -1127,7 +1130,7 @@ function surelerHTML(m) {
     <button class="check${g.bitti ? ' on' : ''}" data-act="toggleGorev" data-id="${g.id}" aria-label="Tamamlandı olarak işaretle">${g.bitti ? '✓' : ''}</button>
     <button class="row-main plain" data-act="editGorev" data-id="${g.id}">
       <div class="row-title wrap${g.bitti ? ' strike' : ''}">${esc(g.baslik)}</div>
-      <div class="row-sub wrap">${kaymaHTML(g.tarih)}${g.not ? ' · ' + esc(g.not) : ''}</div>
+      <div class="row-sub wrap">${kaymaHTML(g.tarih, { mali: gorevMali(g) })}${g.not ? ' · ' + esc(g.not) : ''}</div>
     </button>
     ${g.bitti ? '' : badge(gorevSon(g))}
     ${g.bitti ? '' : `<button class="icon-btn" data-act="icsGorev" data-id="${g.id}" aria-label="Takvime ekle">${I.cal}</button>`}
@@ -1143,22 +1146,27 @@ function gorevSheet(mid, g = null) {
     <datalist id="gorevList">${GOREV_SABLON.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
     ${field('Son gün', 'tarih', v.tarih, { type: 'date', required: true })}
     <p class="hint" id="gorevSonGun"></p>
+    <label class="check-row"><input type="checkbox" name="mali" ${gorevMali(v) ? 'checked' : ''}> <span>Mükellefin süresi (mali tatil uygulanır)</span></label>
     <div class="chips">${[7, 15, 30, 60].map(n => `<button type="button" class="chip" data-plus="${n}">Bugün +${n} gün</button>`).join('')}</div>
     ${textarea('Not', 'not', v.not, 3)}
     ${g ? `<button type="button" class="btn block danger-text" data-act="delGorev" data-id="${g.id}">Sil</button>` : ''}`,
   { onSubmit: async (f, fd) => {
     const item = g ? { ...g } : { id: uid(), kind: 'gorev', mid, bitti: false };
-    Object.assign(item, { baslik: fd.get('baslik').trim(), tarih: fd.get('tarih'), not: fd.get('not').trim() });
+    Object.assign(item, { baslik: fd.get('baslik').trim(), tarih: fd.get('tarih'), not: fd.get('not').trim(), mali: !!fd.get('mali') });
     await save(item);
   } });
   const gosterSon = () => {
     const t = form.elements.tarih.value, el = form.querySelector('#gorevSonGun');
     if (!t) { el.textContent = 'Hafta sonu, resmî tatil ve mali tatile denk gelirse son gün kendiliğinden ileri alınır.'; return; }
-    const r = sonIsGunu(t);
+    const r = sonIsGunu(t, { mali: form.elements.mali.checked });
     el.innerHTML = r.tarih === t ? `Son gün: <b>${fmtD(t)}</b> (${relDays(daysUntil(t))}).${r.arife ? ` ⚠️ ${esc(r.arife)}.` : ''}`
       : `${fmtD(t)} ileri alınır: ${esc(r.nedenler.join(' ve '))}. Geçerli son gün: <b>${fmtD(r.tarih)}</b> (${relDays(daysUntil(r.tarih))}).${r.arife ? ` ⚠️ ${esc(r.arife)}.` : ''}`;
   };
-  form.elements.tarih.addEventListener('input', gosterSon); gosterSon();
+  form.elements.tarih.addEventListener('input', gosterSon);
+  form.elements.mali.addEventListener('change', () => { form.elements.mali.dataset.elle = '1'; gosterSon(); });
+  // Başlık yazılırken, elle değiştirilmediyse mükellef süresi olup olmadığı tahmin edilir
+  form.elements.baslik.addEventListener('input', () => { if (!form.elements.mali.dataset.elle && typeof v.mali !== 'boolean') { form.elements.mali.checked = MUKELLEF_SURESI.test(TR_FOLD(form.elements.baslik.value)); gosterSon(); } });
+  gosterSon();
   form.querySelector('.chips').onclick = e => { const n = e.target.dataset.plus; if (n) { form.elements.tarih.value = addDays(today(), +n); gosterSon(); } };
 }
 function icsFile(uidStr, date, title) {
