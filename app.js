@@ -568,7 +568,8 @@ function kaymaHTML(s, o) {
 const MUKELLEF_SURESI = /ibraz|cevap|bilgi\s*iste|ek\s*sure|itiraz|izah|uzlasma|beyan|odeme|duzelt|savunma|yoklama\s*daveti|davet/;
 const gorevMali = g => typeof g.mali === 'boolean' ? g.mali : MUKELLEF_SURESI.test(TR_FOLD(g.baslik || ''));
 const gorevSon = g => etkinTarih(g.tarih, { mali: gorevMali(g) });
-const bitisSon = m => etkinTarih(m.bitisTarihi, { mali: false });
+// İnceleme (iş emri) bitiş süresi tatile denk gelse de ertelenmez
+const bitisSon = m => m.bitisTarihi || '';
 // Bitişe 15 gün (veya daha az) kala, ek süre istenmediyse uyarı
 const EK_SURE_GUN = 15;
 const ekSureUyari = m => isAktif(m) && m.bitisTarihi && !m.ekSureIstendi && daysUntil(bitisSon(m)) <= EK_SURE_GUN;
@@ -702,7 +703,7 @@ function renderDetail(id) {
         ${box('Adı / Unvanı', m.unvan, { full: true, empty: true })}
         ${box('VKN', m.vkn, { empty: true })}${box('İnceleme yılı', m.donem, { empty: true })}
         ${box('Vergi dairesi', m.vergiDairesi, { empty: true })}${box('İnceleme', inc, { empty: true })}
-        ${m.bitisTarihi ? box('Bitiş süresi', `<span>${kaymaHTML(m.bitisTarihi, { mali: false })}</span> ${isAktif(m) ? (ekSureUyari(m) && daysUntil(bitisSon(m)) > 3 ? badge(bitisSon(m)).replace('badge ok', 'badge warn') : badge(bitisSon(m))) : ''}${m.kalanGun ? `<small class="kalan-not">${fmtD(m.kalanGunTarihi)} itibarıyla ${esc(m.kalanGun)} gün girildi</small>` : ''}`, { raw: true, full: true })
+        ${m.bitisTarihi ? box('Bitiş süresi', `<span>${fmtD(m.bitisTarihi)}</span> ${isAktif(m) ? (ekSureUyari(m) && daysUntil(bitisSon(m)) > 3 ? badge(bitisSon(m)).replace('badge ok', 'badge warn') : badge(bitisSon(m))) : ''}${m.kalanGun ? `<small class="kalan-not">${fmtD(m.kalanGunTarihi)} itibarıyla ${esc(m.kalanGun)} gün girildi</small>` : ''}`, { raw: true, full: true })
           : isAktif(m) ? box('Bitiş süresi', `<button class="btn link sm" data-act="editM" data-id="${id}">Kalan gün sayısını gir</button>`, { raw: true, full: true }) : ''}
         ${isAktif(m) && m.bitisTarihi ? `<div class="ibox full ibox-btns"><button class="btn sm" data-act="icsBitis" data-mid="${id}">${I.cal} Takvime ekle (15 gün önce hatırlat)</button></div>` : ''}
         ${isAktif(m) ? '' : box('Durum', 'Kapandı', { full: true })}
@@ -903,8 +904,7 @@ function mukellefSheet(m = null) {
     const n = parseInt(e.kalanGun.value.replace(/\D/g, ''), 10);
     if (!(n >= 0)) { kalanHint.innerHTML = hintIlk; return; }
     e.bitisTarihi.value = addDays(today(), n);
-    const r = sonIsGunu(e.bitisTarihi.value, { mali: false });
-    kalanHint.innerHTML = `Bitiş: <b>${fmtD(e.bitisTarihi.value)}</b>${r.tarih !== e.bitisTarihi.value ? ` → <b>${fmtD(r.tarih)}</b> (${esc(r.nedenler.join(' ve '))})` : ''}. Ek süre uyarısı: <b>${fmtD(addDays(r.tarih, -EK_SURE_GUN))}</b>.`;
+    kalanHint.innerHTML = `Bitiş: <b>${fmtD(e.bitisTarihi.value)}</b> (tatile denk gelse de ertelenmez). Ek süre uyarısı: <b>${fmtD(addDays(e.bitisTarihi.value, -EK_SURE_GUN))}</b>.`;
   });
   e.bitisTarihi.addEventListener('input', () => { e.kalanGun.value = ''; kalanHint.innerHTML = hintIlk; });
 }
@@ -1493,7 +1493,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 24</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 25</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
