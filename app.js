@@ -572,7 +572,8 @@ const gorevSon = g => etkinTarih(g.tarih, { mali: gorevMali(g) });
 const bitisSon = m => m.bitisTarihi || '';
 // Bitişe 15 gün (veya daha az) kala, ek süre istenmediyse uyarı
 const EK_SURE_GUN = 15;
-const ekSureUyari = m => isAktif(m) && m.bitisTarihi && !m.ekSureIstendi && daysUntil(bitisSon(m)) <= EK_SURE_GUN;
+// Süre sıfırlandıktan (bitiş günü ve sonrası) sonra ek süre istenemez; uyarı yalnızca 1–15 gün kala çıkar
+const ekSureUyari = m => { if (!isAktif(m) || !m.bitisTarihi || m.ekSureIstendi) return false; const n = daysUntil(bitisSon(m)); return n > 0 && n <= EK_SURE_GUN; };
 function bilgiSonGun(b) {
   if (!b.tebligTarihi) return '';
   return sonIsGunu(addDays(b.tebligTarihi, +(b.sureGun || 15))).tarih;
@@ -1493,7 +1494,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 25</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 26</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
