@@ -620,7 +620,7 @@ function renderHome() {
       <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan veya VKN ara" value="${esc(S.q)}"></label>
       ${all('mukellef').length ? `<div class="yukle-grid">
         <button class="ybox" data-act="topluBilgi"><span class="ybox-ico">📄</span><b>Bilgi isteme yazıları</b><small>Yazıları yükle</small></button>
-        <button class="ybox" data-act="veriYukle"><span class="ybox-ico">🗂️</span><b>İnceleme verileri</b><small>Sıkıştırılmış dosya yükle</small></button>
+        <button class="ybox" data-act="veriYukle"><span class="ybox-ico">🗂️</span><b>İnceleme verileri</b><small>ZIP, RAR, 7z yükle</small></button>
       </div>` : ''}
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
       <div id="mlist"></div>
@@ -982,7 +982,8 @@ async function topluBilgiFlow() {
 }
 
 /* ---------- inceleme verileri (sıkıştırılmış dosyalar) ---------- */
-const VERI_ACCEPT = '.zip,.rar,.7z,.tar,.gz,.tgz,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/x-7z-compressed,application/gzip';
+// iPhone, RAR/7z gibi türleri tür filtresinde tanımadığı için soluk gösteriyor; bu yüzden filtre yok, her dosya seçilebilir
+const VERI_ACCEPT = '';
 const VERI_SINIR = 150 * 1048576; // 150 MB
 let jszipYuklendi = null;
 const jszip = () => jszipYuklendi ??= new Promise((res, rej) => {
@@ -1490,7 +1491,8 @@ async function buildBackup() {
 }
 function pickFiles(accept) {
   return new Promise(res => {
-    const i = Object.assign(document.createElement('input'), { type: 'file', accept, multiple: true });
+    const i = Object.assign(document.createElement('input'), { type: 'file', multiple: true });
+    if (accept) i.accept = accept;
     i.onchange = () => res([...i.files]);
     i.click();
   });
