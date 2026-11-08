@@ -330,7 +330,7 @@ const sameVault = (a, b) => a && b && cr.b64(a.wrapped) === cr.b64(b.wrapped) &&
 function lockShell(inner, { footer = true } = {}) {
   const u = cloud.currentUser();
   app.innerHTML = `<div class="lock">
-    <img src="icons/muhur-192.png" class="lock-icon" alt="">
+    <img src="icons/canta-192.png" class="lock-icon" alt="">
     <h1>El Defteri</h1>
     ${inner}
     ${footer && u ? `<p class="footnote center lock-foot">${esc(u.email)} · <button class="btn link sm" data-act="signout">Çıkış yap</button></p>` : ''}
@@ -1474,7 +1474,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 22</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 23</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();

@@ -1,8 +1,8 @@
 // Önce ağ, internet yoksa önbellek: güncellemeler hemen görünür, uygulama internetsiz de açılır.
 // Kullanıcı verisi burada yoktur (IndexedDB'de şifreli).
-const CACHE = 'el-defteri-v22';
+const CACHE = 'el-defteri-v23';
 const ASSETS = ['./', './index.html', './app.css', './app.js', './db.js', './crypto.js', './cloud.js', './extract.js', './manifest.webmanifest',
-  './icons/muhur-192.png', './icons/muhur-512.png', './icons/muhur-180.png',
+  './icons/canta-192.png', './icons/canta-512.png', './icons/canta-180.png',
   './vendor/firebase/firebase.js', './vendor/jszip/jszip.min.js', './vendor/pdfjs/pdf.min.js', './vendor/pdfjs/pdf.worker.min.js'];
 
 self.addEventListener('install', e => {
