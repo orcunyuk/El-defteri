@@ -322,7 +322,7 @@ function render() {
   if (p[0] === 'sureler') return renderSureler();
   renderHome();
 }
-window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); document.body.classList.remove('scrolled'); });
+window.addEventListener('hashchange', () => { ekleKapat(); render(); window.scrollTo(0, 0); document.body.classList.remove('scrolled'); });
 
 /* ---------- giriş ve kilit ---------- */
 const G_LOGO = '<svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
@@ -607,6 +607,31 @@ function sureBox(a) {
     <small>${fmtD(a.d)}</small>
   </a>`;
 }
+/* ---------- ＋ düğmesi: yukarı açılan ekleme menüsü ---------- */
+const EKLE = [
+  ['newM', 'Yeni mükellef', 'Elle veya iş emrinden', 'mavi', svg('<circle cx="10" cy="8" r="4"/><path d="M2 21a8 8 0 0 1 13-6M19 14v6M16 17h6"/>')],
+  ['paket', 'Hazır paket', '.eldefteri.json', 'mor', svg('<path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/>')],
+  ['topluBilgi', 'Bilgi isteme yazıları', 'PDF veya fotoğraf', 'yesil', svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>')],
+  ['veriYukle', 'İnceleme verileri', 'ZIP, RAR, 7z', 'turuncu', svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 4v4h4V4M12 11v6M9 14l3-3 3 3"/>')],
+];
+function ekleMenu() {
+  const fab = $('.fab');
+  if (document.querySelector('.dial')) return ekleKapat();
+  const mukellefVar = all('mukellef').length > 0;
+  const el = document.createElement('div');
+  el.className = 'dial';
+  el.innerHTML = `<div class="dial-bg" data-act="ekleKapat"></div><div class="dial-list">${EKLE.map(([act, t, a, c, ic]) => {
+    const kapali = !mukellefVar && (act === 'topluBilgi' || act === 'veriYukle');
+    return `<button class="dial-item" data-act="ekleSec" data-v="${act}"${kapali ? ' disabled' : ''}><span class="dial-lbl"><b>${t}</b><small>${kapali ? 'Önce mükellef ekle' : a}</small></span><i class="dial-ico ${c}">${ic}</i></button>`;
+  }).join('')}</div>`;
+  document.body.appendChild(el);
+  fab?.classList.add('acik'); fab?.setAttribute('aria-expanded', 'true');
+}
+function ekleKapat() {
+  document.querySelector('.dial')?.remove();
+  const fab = $('.fab'); fab?.classList.remove('acik'); fab?.setAttribute('aria-expanded', 'false');
+}
+
 function renderHome() {
   const alerts = acikSureler().filter(a => daysUntil(a.d) <= (a.g ? 7 : 30));
   const banners = [];
@@ -615,19 +640,15 @@ function renderHome() {
     banners.push(`<a class="banner" href="#/ayarlar"><b>Yedek al:</b> ${S.lastBackup ? 'Son yedek ' + fmtTs(S.lastBackup) + '.' : 'Henüz yedek almadın.'}</a>`);
   }
   const seg = (v, l) => `<button class="${S.filter === v ? 'on' : ''}" data-act="filter" data-v="${v}">${l}</button>`;
-  app.innerHTML = header('Dosyalar', { left: `<button class="nav-btn" data-act="lock">Kilitle</button>`, right: `<button class="nav-btn icon" data-act="newM" aria-label="Yeni dosya">${I.plus}</button>` }) +
+  app.innerHTML = header('Dosyalar', { left: `<button class="nav-btn" data-act="lock">Kilitle</button>` }) +
     `<div class="page">
       <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan veya VKN ara" value="${esc(S.q)}"></label>
-      ${all('mukellef').length ? `<div class="yukle-grid">
-        <button class="ybox" data-act="topluBilgi"><span class="ybox-ico">📄</span><b>Bilgi isteme yazıları</b><small>Yazıları yükle</small></button>
-        <button class="ybox" data-act="veriYukle"><span class="ybox-ico">🗂️</span><b>İnceleme verileri</b><small>ZIP, RAR, 7z yükle</small></button>
-      </div>` : ''}
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
       <div id="mlist"></div>
       ${alerts.length ? `<h2 class="sec">Yaklaşan süreler</h2><div class="box-grid">${alerts.map(sureBox).join('')}</div>` : ''}
       ${banners.join('')}
     </div>
-    <button class="fab" data-act="newM" aria-label="Yeni dosya">${I.plus}</button>${tabbar('dosyalar')}`;
+    <button class="fab" data-act="ekleMenu" aria-label="Ekle" aria-expanded="false">${I.plus}</button>${tabbar('dosyalar')}`;
   $('#q').oninput = e => { S.q = e.target.value; drawMList(); };
   drawMList();
 }
@@ -1445,7 +1466,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 19</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 20</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
@@ -1574,6 +1595,9 @@ const ACT = {
   lock: () => lock(),
   filter: d => { S.filter = d.v; renderHome(); },
   newM: () => mukellefSheet(),
+  ekleMenu: () => ekleMenu(),
+  ekleKapat: () => ekleKapat(),
+  ekleSec: (d, el, e) => { ekleKapat(); return ACT[d.v](d, el, e); },
   editM: d => mukellefSheet(S.items.get(d.id)),
   toggleDurum: async d => { const m = S.items.get(d.id); await save({ ...m, durum: isAktif(m) ? 'kapandi' : 'aktif' }); render(); },
   delM: async d => {
