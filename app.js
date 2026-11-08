@@ -808,8 +808,16 @@ function mukellefSheet(m = null) {
   const form = openSheet(m ? 'Dosyayı düzenle' : 'Yeni dosya', `
     <div class="autofill">
       <button type="button" class="btn primary block" data-autofill>${I.doc} Belgeden doldur</button>
-      ${m ? '' : '<button type="button" class="btn block" data-act="paket">📦 Hazır paketi içe aktar</button>'}
-      <p class="hint">İş emri, beyanname, yoklama fişi ya da ekran görüntüsü seç. Bilgiler telefonun içinde okunur; belge saklanmaz, hiçbir yere gönderilmez.</p>
+      <div class="belge-not">
+        <b>Yüklenecek belgeler</b> <small>(birlikte seçebilirsin)</small>
+        <ul>
+          <li><b>İş emri</b><span>unvan, VKN, inceleme yılı ve türü, iş emri sayısı ve tarihi</span></li>
+          <li><b>Son dönem KDV beyannamesi</b><span>vergi dairesi, adres, faaliyet, SMMM bilgisi</span></li>
+          <li><b>Son yoklama fişi</b><span>güncel adres, yetkili kişi ve telefonu</span></li>
+        </ul>
+        <small>İsteğe bağlı: son yıllık gelir/kurumlar vergisi beyannamesi, varsa önceki tutanaklar. PDF ya da ekran görüntüsü olabilir.</small>
+      </div>
+      <p class="hint">Bilgiler telefonun içinde okunur; belge saklanmaz, hiçbir yere gönderilmez.</p>
       <div class="af-status" aria-live="polite"></div>
     </div>
     ${field('Adı / Unvanı', 'unvan', v.unvan, { required: true })}
@@ -1466,7 +1474,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 20</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 21</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();

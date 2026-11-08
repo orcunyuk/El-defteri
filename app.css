@@ -377,3 +377,11 @@ details.more .info-grid { margin-top: 10px; }
 /* ---------- ana sayfa: yükleme kutuları ---------- */
 .row-ico.arsiv { background: var(--fill); font-size: 17px; }
 .ty-sub.mt6 { margin-top: 6px; }
+
+/* Yeni dosya: yüklenecek belgeler notu */
+.belge-not { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--fill); font-size: 13px; line-height: 1.35; }
+.belge-not > small { color: var(--muted); }
+.belge-not ul { margin: 6px 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+.belge-not li { padding-left: 16px; position: relative; }
+.belge-not li::before { content: "•"; position: absolute; left: 4px; color: var(--accent); font-weight: 700; }
+.belge-not li span { display: block; color: var(--muted); font-size: 12px; }
