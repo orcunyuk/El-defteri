@@ -325,6 +325,14 @@ details.more .info-grid { margin-top: 10px; }
 .box-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .dbox, .sbox { display: flex; flex-direction: column; background: var(--cell); border-radius: 14px; padding: 11px 12px 10px; color: var(--text); min-width: 0; }
 .dbox:active, .sbox:active { background: var(--cell-press); }
+/* Kalan inceleme süresine göre kart rengi */
+:root { --sure-y: #d4f1dc; --sure-y-fg: #1b6e30; --sure-t: #ffe1b8; --sure-t-fg: #a35500; --sure-r: #f8d0d0; --sure-r-fg: #b00012; }
+[data-theme=koyu] { --sure-y: #17331f; --sure-y-fg: #6fdc8c; --sure-t: #3d2a0c; --sure-t-fg: #ffb454; --sure-r: #401717; --sure-r-fg: #ff8080; }
+.dbox.sure-y { background: var(--sure-y); --sure-fg: var(--sure-y-fg); }
+.dbox.sure-t { background: var(--sure-t); --sure-fg: var(--sure-t-fg); }
+.dbox.sure-r { background: var(--sure-r); --sure-fg: var(--sure-r-fg); }
+.dbox-sure { margin-top: auto; padding-top: 8px; font-size: 12px; font-weight: 600; color: var(--sure-fg); }
+.dbox-sure + small { margin-top: 0; padding-top: 1px; }
 .dbox > b, .sbox > b { font-size: 15px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .dbox dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 8px 0 0; font-size: 14px; }

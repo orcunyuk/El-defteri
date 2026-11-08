@@ -639,7 +639,7 @@ function ekleKapat() {
 }
 
 function renderHome() {
-  const alerts = acikSureler().filter(a => daysUntil(a.d) <= (a.g ? 7 : 30));
+  const alerts = acikSureler().filter(a => (a.m && !a.ek) ? false : daysUntil(a.d) <= (a.g ? 7 : 30));
   const banners = [];
   if (!isStandalone()) banners.push(`<div class="banner warn"><b>Ana ekrana ekle:</b> Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile yükleyip uygulamayı oradan aç.</div>`);
   if (S.items.size && !cloudOn() && (!S.lastBackup || Date.now() - S.lastBackup > 14 * 864e5)) {
@@ -668,13 +668,16 @@ function drawMList() {
     const lc = lastContact(m.id);
     const og = byM('gorev', m.id).filter(g => !g.bitti).length;
     const tur = m.incelemeTuru === 'sinirli' ? 'Sınırlı' : m.incelemeTuru === 'tam' ? 'Tam' : '';
-    return `<a class="dbox" href="#/m/${m.id}">
+    const sr = m.bitisTarihi && isAktif(m) ? daysUntil(bitisSon(m)) : null;
+    const sc = sr === null ? '' : sr > 30 ? ' sure-y' : sr > 0 ? ' sure-t' : ' sure-r';
+    const st = sr === null ? '' : sr > 0 ? `Kalan ${sr} gün` : sr === 0 ? 'Süre doldu (bugün)' : `Süre doldu (${-sr} gün geçti)`;
+    return `<a class="dbox${sc}" href="#/m/${m.id}">
       <b>${esc(kisaAd(m))}</b>
       <dl>
         <dt>${m.vkn || !m.tckn ? 'VKN' : 'TCKN'}</dt><dd>${esc(m.vkn || m.tckn || '—')}</dd>
         <dt>Yıl</dt><dd>${esc([m.donem, tur].filter(Boolean).join(' · ') || '—')}</dd>
       </dl>
-      <small>${lc ? 'Son temas: ' + relPast(lc) : 'Görüşme yok'}${og ? ` · ${og} süre` : ''}</small>
+      ${st ? `<span class="dbox-sure">${st}</span>` : ''}<small>${lc ? 'Son temas: ' + relPast(lc) : 'Görüşme yok'}${og ? ` · ${og} süre` : ''}</small>
     </a>`;
   }).join('')}</div>`
     : `<div class="list"><p class="empty">${q ? 'Eşleşen dosya yok.' : S.filter === 'aktif' ? 'Henüz dosya yok. <b>+</b> ile yeni dosya aç.' : 'Kapanan dosya yok.'}</p></div>`;
@@ -682,7 +685,7 @@ function drawMList() {
 
 /* ---------- tüm süreler ---------- */
 function renderSureler() {
-  const list = acikSureler();
+  const list = acikSureler().filter(a => !(a.m && !a.ek && daysUntil(a.d) < 0));
   const groups = [['Süresi geçenler', a => daysUntil(a.d) < 0], ['Bu hafta', a => daysUntil(a.d) >= 0 && daysUntil(a.d) <= 7], ['Bu ay', a => daysUntil(a.d) > 7 && daysUntil(a.d) <= 31], ['Daha sonra', a => daysUntil(a.d) > 31]];
   app.innerHTML = header('Süreler') + `<div class="page">
     ${groups.map(([t, f]) => { const g = list.filter(f); return g.length ? `<h2 class="sec">${t}</h2><div class="list">${g.map(a => sureRow(a.href, a.title, a.sub, a.d)).join('')}</div>` : ''; }).join('')
@@ -1494,7 +1497,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 26</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 27</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
