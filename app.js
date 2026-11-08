@@ -91,6 +91,9 @@ const I = {
   folderFill: '<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2.2h7A2.5 2.5 0 0 1 21 8.7v9.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z"/></svg>',
   clockFill: '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 6.5V12l3.5 2.2" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
   gearFill: '<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8.2 4.6.1-1.1-.1-1.1 2-1.6-2-3.4-2.4 1a8 8 0 0 0-1.9-1.1L15.5 3h-4l-.4 2.7a8 8 0 0 0-1.9 1.1l-2.4-1-2 3.4 2 1.6-.1 1.2.1 1.1-2 1.6 2 3.4 2.4-1c.6.5 1.2.8 1.9 1.1l.4 2.8h4l.4-2.7c.7-.3 1.3-.7 1.9-1.1l2.4 1 2-3.4z"/></svg>',
+  lockFill: '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M7 10V7.5a5 5 0 0 1 10 0V10h.5A2.5 2.5 0 0 1 20 12.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 19.5v-7A2.5 2.5 0 0 1 6.5 10zm2 0h6V7.5a3 3 0 0 0-6 0z"/></svg>',
+  moonFill: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M20.4 15.3A9 9 0 0 1 8.7 3.6 9.2 9.2 0 1 0 20.4 15.3z"/></svg>',
+  sunFill: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="4.6"/><g stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 1.8v2.4M12 19.8v2.4M1.8 12h2.4M19.8 12h2.4M4.8 4.8l1.7 1.7M17.5 17.5l1.7 1.7M4.8 19.2l1.7-1.7M17.5 6.5l1.7-1.7"/></g></svg>',
   search: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
 };
 const AV_COLORS = ['#ff9500', '#34c759', '#5ac8fa', '#af52de', '#ff2d55', '#5856d6', '#ffcc00', '#007aff', '#30b0c7', '#a2845e'];
@@ -646,7 +649,11 @@ function renderHome() {
     banners.push(`<a class="banner" href="#/ayarlar"><b>Yedek al:</b> ${S.lastBackup ? 'Son yedek ' + fmtTs(S.lastBackup) + '.' : 'Henüz yedek almadın.'}</a>`);
   }
   const seg = (v, l) => `<button class="${S.filter === v ? 'on' : ''}" data-act="filter" data-v="${v}">${l}</button>`;
-  app.innerHTML = header('Dosyalar', { left: `<button class="nav-btn" data-act="lock">Kilitle</button>` }) +
+  const koyu = document.documentElement.dataset.theme === 'koyu';
+  app.innerHTML = header('Dosyalar', {
+    left: `<button class="nav-btn icon" data-act="lock" aria-label="Kilitle">${I.lockFill}</button>`,
+    right: `<button class="tema-tg" data-act="temaGec" aria-label="${koyu ? 'Aydınlık moda geç' : 'Karanlık moda geç'}"><span class="${koyu ? '' : 'on'}">${I.sunFill}</span><span class="${koyu ? 'on' : ''}">${I.moonFill}</span></button>`,
+  }) +
     `<div class="page">
       <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan veya VKN ara" value="${esc(S.q)}"></label>
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
@@ -1497,7 +1504,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 27</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 28</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
@@ -1624,6 +1631,7 @@ const ACT = {
   closeSheet: () => closeSheet(),
   theme: async d => { S.settings.theme = d.v; applyTheme(); await db.metaSet('settings', S.settings); renderSettings(); },
   lock: () => lock(),
+  temaGec: async () => { S.settings.theme = document.documentElement.dataset.theme === 'koyu' ? 'acik' : 'koyu'; applyTheme(); await db.metaSet('settings', S.settings); renderHome(); },
   filter: d => { S.filter = d.v; renderHome(); },
   newM: () => mukellefSheet(),
   ekleMenu: () => ekleMenu(),
