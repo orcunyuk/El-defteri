@@ -53,6 +53,6 @@ export async function clearData() {
   const d = await open();
   const t = d.transaction(['meta', 'items', 'files'], 'readwrite');
   t.objectStore('items').clear(); t.objectStore('files').clear();
-  ['vault', 'cloud', 'lastBackup'].forEach(k => t.objectStore('meta').delete(k));
+  ['vault', 'cloud', 'lastBackup', 'dirtyFiles'].forEach(k => t.objectStore('meta').delete(k));
   return done(t);
 }

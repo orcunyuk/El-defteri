@@ -121,12 +121,19 @@ async function save(item) {
   S.items.set(item.id, item);
   scheduleSync();
 }
+// Buluta gönderilmeyi bekleyen dosyaların kimlikleri (büyük arşivleri her eşitlemede okumamak için)
+async function dosyaIsaretle(ids, bekliyor = true) {
+  const l = new Set((await db.metaGet('dirtyFiles')) || []);
+  ids.filter(Boolean).forEach(id => bekliyor ? l.add(id) : l.delete(id));
+  await db.metaSet('dirtyFiles', [...l]);
+}
 async function removeItems(ids, fileIds = []) {
   if (cloudOn()) {
     // Silinenler diğer cihazlara da bildirilsin diye işaretlenir
     const now = Date.now();
     await db.putMany('items', ids.map(id => ({ id, kind: S.items.get(id)?.kind || '', deleted: 1, updated: now, dirty: 1 })));
     await db.putMany('files', fileIds.filter(Boolean).map(id => ({ id, deleted: 1, dirty: 1 })));
+    await dosyaIsaretle(fileIds);
   } else {
     await db.delMany('items', ids);
     await db.delMany('files', fileIds);
@@ -137,6 +144,7 @@ async function removeItems(ids, fileIds = []) {
 async function saveFile(id, buf) {
   const { iv, data } = await cr.encBytes(S.key, buf);
   await db.put('files', { id, iv, data, ...(cloudOn() ? { dirty: 1 } : {}) });
+  if (cloudOn()) await dosyaIsaretle([id]);
   scheduleSync();
 }
 async function loadFile(id, mime) {
@@ -186,9 +194,18 @@ async function sync({ quiet = true } = {}) {
           else { delete cur.dirty; await db.put('items', cur); }
         }
       }
-      for (const f of (await db.getAll('files')).filter(f => f.dirty)) {
-        if (f.deleted) { await cloud.deleteFile(f.id); await db.delMany('files', [f.id]); }
-        else { await cloud.pushFile(f.id, f.iv, f.data); delete f.dirty; await db.put('files', f); }
+      let bekleyen = await db.metaGet('dirtyFiles');
+      if (!Array.isArray(bekleyen)) { // ilk kez: eski kayıtlar için bir kez tara
+        bekleyen = (await db.getAll('files')).filter(f => f.dirty).map(f => f.id);
+        await db.metaSet('dirtyFiles', bekleyen);
+      }
+      for (const id of bekleyen) {
+        const f = await db.get('files', id);
+        if (f?.dirty) {
+          if (f.deleted) { await cloud.deleteFile(f.id); await db.delMany('files', [f.id]); }
+          else { await cloud.pushFile(f.id, f.iv, f.data); delete f.dirty; await db.put('files', f); }
+        }
+        await dosyaIsaretle([id], false);
       }
       // 2) Diğer cihazlardaki değişiklikleri al
       const { recs, cursor } = await cloud.pullItems(S.cloud.cursor);
@@ -453,7 +470,9 @@ function lockPassword(mode, cloudVault) {
         S.cloud = { uid: u.uid, email: u.email, cursor: null };
         await db.metaSet('cloud', S.cloud);
         await db.putMany('items', (await db.getAll('items')).map(r => ({ ...r, updated: r.updated || Date.now(), dirty: 1 })));
-        await db.putMany('files', (await db.getAll('files')).map(f => ({ ...f, dirty: 1 })));
+        const tumDosyalar = await db.getAll('files');
+        await db.putMany('files', tumDosyalar.map(f => ({ ...f, dirty: 1 })));
+        await db.metaSet('dirtyFiles', tumDosyalar.map(f => f.id));
         await loadItems();
         btn.textContent = 'Buluta yükleniyor…';
         await sync({ quiet: false });
@@ -599,7 +618,10 @@ function renderHome() {
   app.innerHTML = header('Dosyalar', { left: `<button class="nav-btn" data-act="lock">Kilitle</button>`, right: `<button class="nav-btn icon" data-act="newM" aria-label="Yeni dosya">${I.plus}</button>` }) +
     `<div class="page">
       <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan veya VKN ara" value="${esc(S.q)}"></label>
-      ${all('mukellef').length ? `<button class="btn block toplu-btn" data-act="topluBilgi">${I.doc} Bilgi isteme yazılarını yükle</button>` : ''}
+      ${all('mukellef').length ? `<div class="yukle-grid">
+        <button class="ybox" data-act="topluBilgi"><span class="ybox-ico">📄</span><b>Bilgi isteme yazıları</b><small>Yazıları yükle</small></button>
+        <button class="ybox" data-act="veriYukle"><span class="ybox-ico">🗂️</span><b>İnceleme verileri</b><small>Sıkıştırılmış dosya yükle</small></button>
+      </div>` : ''}
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
       <div id="mlist"></div>
       ${alerts.length ? `<h2 class="sec">Yaklaşan süreler</h2><div class="box-grid">${alerts.map(sureBox).join('')}</div>` : ''}
@@ -676,6 +698,8 @@ function renderDetail(id) {
         : `<div class="list"><button class="row action" data-act="kisi" data-mid="${id}">Telefon / kişi ekle</button></div>`}
 
       ${bilgiHTML(m)}
+
+      ${verilerHTML(m)}
 
       ${surelerHTML(m)}
 
@@ -955,6 +979,124 @@ async function topluBilgiFlow() {
     }
     toast(`${n} yazı ilgili dosyalara kaydedildi`);
   } });
+}
+
+/* ---------- inceleme verileri (sıkıştırılmış dosyalar) ---------- */
+const VERI_ACCEPT = '.zip,.rar,.7z,.tar,.gz,.tgz,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/x-7z-compressed,application/gzip';
+const VERI_SINIR = 150 * 1048576; // 150 MB
+let jszipYuklendi = null;
+const jszip = () => jszipYuklendi ??= new Promise((res, rej) => {
+  if (window.JSZip) return res(window.JSZip);
+  const sc = Object.assign(document.createElement('script'), { src: 'vendor/jszip/jszip.min.js' });
+  sc.onload = () => res(window.JSZip); sc.onerror = () => rej(new Error('ZIP okuyucu yüklenemedi'));
+  document.head.append(sc);
+});
+// Arşivin içindeki dosya adları ve okunabilir metinler (eşleştirme için); içerik saklanmaz
+async function arsivIncele(file, buf, ilerleme) {
+  const sonuc = { metin: file.name, dosyaSayisi: null, ornekler: [] };
+  if (!/\.zip$/i.test(file.name) && !/zip/.test(file.type)) return sonuc; // RAR/7z: yalnızca dosya adı
+  let zip;
+  try { zip = await (await jszip()).loadAsync(buf); } catch (e) { console.warn('zip açılamadı', e); return sonuc; }
+  const girdiler = Object.values(zip.files).filter(f => !f.dir);
+  sonuc.dosyaSayisi = girdiler.length;
+  sonuc.ornekler = girdiler.slice(0, 6).map(f => f.name.split('/').pop());
+  const parcalar = [girdiler.map(f => f.name).join('\n')];
+  let okunan = 0, pdf = 0;
+  for (const f of girdiler) {
+    if (okunan > 1500000) break; // en çok ~1,5 MB metin
+    const ad = f.name.toLowerCase();
+    try {
+      if (/\.(txt|csv|xml|json|html?|tsv)$/.test(ad)) {
+        const t = (await f.async('string')).slice(0, 200000); parcalar.push(t); okunan += t.length;
+      } else if (/\.xlsx$/.test(ad)) {
+        const ic = await (await jszip()).loadAsync(await f.async('arraybuffer'));
+        const ss = ic.file('xl/sharedStrings.xml'); if (ss) { const t = (await ss.async('string')).replace(/<[^>]+>/g, ' ').slice(0, 200000); parcalar.push(t); okunan += t.length; }
+      } else if (/\.pdf$/.test(ad) && pdf < 2) {
+        pdf++; ilerleme?.(`${f.name.split('/').pop()} okunuyor…`);
+        const t = await extractText(new File([await f.async('arraybuffer')], f.name, { type: 'application/pdf' }));
+        parcalar.push(t.slice(0, 100000)); okunan += t.length;
+      }
+    } catch (e) { console.warn('arşiv içi okunamadı', f.name, e); }
+  }
+  sonuc.metin = parcalar.join('\n');
+  return sonuc;
+}
+async function veriYukleFlow(mid = null) {
+  const files = await pickFiles(VERI_ACCEPT);
+  if (!files.length) return;
+  const buyuk = files.filter(f => f.size > VERI_SINIR);
+  if (buyuk.length) toast(`${buyuk.map(f => f.name).join(', ')} 150 MB'tan büyük; eklenmedi`);
+  const secilen = files.filter(f => f.size <= VERI_SINIR);
+  if (!secilen.length) return;
+  const sonuc = [];
+  openSheet('Veriler inceleniyor', `<p class="muted" id="veriDurum">Hazırlanıyor…</p><p class="hint">Arşivler telefonun içinde açılıp hangi mükellefe ait olduğu bulunuyor.</p>`);
+  for (const [n, f] of secilen.entries()) {
+    const yaz = t => { const el = $('#veriDurum'); if (el) el.textContent = `${n + 1}/${secilen.length} · ${f.name}${t ? ': ' + t : ''}`; };
+    yaz();
+    const buf = await f.arrayBuffer();
+    const inc = await arsivIncele(f, buf, yaz);
+    const m = mid ? S.items.get(mid) : mukellefBul(inc.metin);
+    const kayitli = m && byM('veri', m.id).some(x => x.ad === f.name && x.size === f.size);
+    sonuc.push({ f, buf, inc, m, kayitli });
+  }
+  const ms = all('mukellef').sort((a, b) => coll.compare(kisaAd(a), kisaAd(b)));
+  const satir = (x, i) => {
+    const et = x.kayitli ? ['done', 'Zaten kayıtlı'] : x.m ? ['ok', mid ? 'Bu dosyaya' : 'Eşleşti'] : ['warn', 'Dosya seç'];
+    return `<div class="tyazi">
+      <div class="ty-head"><b>${esc(x.f.name)}</b><span class="badge ${et[0]}">${et[1]}</span></div>
+      <label class="fld"><span>Kaydedilecek dosya</span><select name="v${i}">
+        <option value="">— Atla —</option>
+        ${ms.map(m => `<option value="${m.id}"${x.m?.id === m.id && !x.kayitli ? ' selected' : ''}>${esc(kisaAd(m))}${m.vkn ? ' · ' + m.vkn : ''}</option>`).join('')}
+      </select></label>
+      <p class="ty-sub">${fmtSize(x.f.size)}${x.inc.dosyaSayisi != null ? ` · ${x.inc.dosyaSayisi} dosya` : ' · içi okunamadı, ada göre eşleştirildi'}${x.inc.ornekler.length ? `<br>${esc(x.inc.ornekler.join(', '))}${x.inc.dosyaSayisi > x.inc.ornekler.length ? ', …' : ''}` : ''}</p>
+    </div>`;
+  };
+  const toplam = sonuc.reduce((t, x) => t + x.f.size, 0);
+  openSheet('İnceleme verilerini kaydet', `
+    <p class="card">${sonuc.length} arşiv (${fmtSize(toplam)}). Seçilen dosyaların altında “İnceleme verileri” bölümünde şifreli saklanır${cloudOn() ? ' ve diğer cihazlarına eşitlenir' : ''}.</p>
+    ${sonuc.map(satir).join('')}
+    ${cloudOn() ? '<p class="hint">Bulutta toplam 1 GB ücretsiz alan var; büyük arşivler bu alandan düşer.</p>' : ''}`,
+  { submitLabel: 'Kaydet', onSubmit: async (f, fd) => {
+    let n = 0;
+    for (const [i, x] of sonuc.entries()) {
+      const hedef = fd.get('v' + i);
+      if (!hedef) continue;
+      const fileId = uid();
+      await saveFile(fileId, x.buf);
+      await save({ id: uid(), kind: 'veri', mid: hedef, ad: x.f.name, size: x.f.size, mime: x.f.type || 'application/zip', fileId,
+        dosyaSayisi: x.inc.dosyaSayisi, ornekler: x.inc.ornekler, aciklama: '' });
+      n++;
+    }
+    toast(`${n} arşiv kaydedildi`);
+  } });
+}
+function verilerHTML(m) {
+  const vs = byM('veri', m.id).sort((a, b) => b.created - a.created);
+  return `<div class="sec-row"><h2 class="sec">İnceleme verileri</h2><button class="btn link sm" data-act="veriYukle" data-mid="${m.id}">+ Ekle</button></div>
+    ${vs.length ? `<div class="list">${vs.map(v => `<button class="row" data-act="veriAc" data-id="${v.id}">
+        <span class="row-ico arsiv">🗂️</span>
+        <div class="row-main"><div class="row-title wrap">${esc(v.aciklama || v.ad)}</div>
+          <div class="row-sub">${fmtSize(v.size)}${v.dosyaSayisi != null ? ` · ${v.dosyaSayisi} dosya` : ''} · ${fmtTs(v.created)}</div></div>${I.chev}</button>`).join('')}</div>`
+      : '<p class="footnote">E-defter, banka ekstresi, fatura listesi gibi sıkıştırılmış (ZIP) verileri ekle; istediğinde cihazına indirebilirsin.</p>'}`;
+}
+async function veriAc(id) {
+  const v = S.items.get(id);
+  S.veriDosya = null;
+  openSheet(v.aciklama || v.ad, `
+    <div class="card"><div class="row-title wrap">${esc(v.ad)}</div>
+      <div class="row-sub">${fmtSize(v.size)}${v.dosyaSayisi != null ? ` · ${v.dosyaSayisi} dosya` : ''} · eklendi ${fmtTs(v.created, true)}</div>
+      ${v.ornekler?.length ? `<p class="ty-sub mt6">${esc(v.ornekler.join(', '))}${v.dosyaSayisi > v.ornekler.length ? ', …' : ''}</p>` : ''}</div>
+    <button type="button" class="btn primary block lg" id="veriIndir" disabled>Hazırlanıyor…</button>
+    <p class="hint">iPhone'da “Dosyalar'a Kaydet”i seç; bilgisayarda İndirilenler klasörüne iner. İndirilen dosya şifresizdir, yalnızca güvendiğin yere kaydet.</p>
+    <button type="button" class="btn block danger-text" data-act="veriSil" data-id="${id}">Sil</button>`, { wide: true });
+  try {
+    const blob = await loadFile(v.fileId, v.mime);
+    const btn = $('#veriIndir'); if (!btn) return;
+    if (!blob) { btn.textContent = 'Dosya bulunamadı (internet bağlantısını kontrol et)'; return; }
+    S.veriDosya = new File([blob], v.ad, { type: v.mime || 'application/zip' });
+    btn.disabled = false; btn.textContent = 'İndir';
+    btn.onclick = () => shareOrDownload(S.veriDosya);
+  } catch (e) { const btn = $('#veriIndir'); if (btn) btn.textContent = 'Hata: ' + (e.message || e); }
 }
 
 function bilgiSheet(mid, b = null) {
@@ -1336,7 +1478,9 @@ async function drawUyeler() {
 
 async function buildBackup() {
   const items = await db.getAll('items');
-  const files = await db.getAll('files');
+  // İnceleme verisi arşivleri yedek dosyasına alınmaz (çok büyük olabilir; bulutta ayrıca saklanır)
+  const arsivler = new Set(all('veri').map(v => v.fileId));
+  const files = (await db.getAll('files')).filter(f => !arsivler.has(f.id));
   const obj = {
     app: 'el-defteri', v: 1, createdAt: new Date().toISOString(), vault: cr.vaultToJSON(S.vault),
     items: items.map(r => ({ id: r.id, kind: r.kind, iv: cr.b64(r.iv), data: cr.b64(r.data) })),
@@ -1432,9 +1576,9 @@ const ACT = {
   toggleDurum: async d => { const m = S.items.get(d.id); await save({ ...m, durum: isAktif(m) ? 'kapandi' : 'aktif' }); render(); },
   delM: async d => {
     const m = S.items.get(d.id);
-    if (!confirm(`“${m.unvan}” dosyası ve içindeki tüm notlar, ses kayıtları, bilgi isteme yazıları ve süreler silinsin mi? Bu işlem geri alınamaz.`)) return;
+    if (!confirm(`“${m.unvan}” dosyası ve içindeki tüm notlar, ses kayıtları, bilgi isteme yazıları, inceleme verileri ve süreler silinsin mi? Bu işlem geri alınamaz.`)) return;
     const kids = [...S.items.values()].filter(i => i.mid === m.id);
-    const fileIds = kids.flatMap(i => i.kind === 'belge' ? [i.fileId] : i.kind === 'kayit' ? (i.sesler || []).map(s => s.fileId) : []);
+    const fileIds = kids.flatMap(i => i.kind === 'belge' || i.kind === 'veri' ? [i.fileId] : i.kind === 'kayit' ? (i.sesler || []).map(s => s.fileId) : []);
     await removeItems([m.id, ...kids.map(i => i.id)], fileIds);
     location.hash = '#/';
     toast('Dosya silindi');
@@ -1462,6 +1606,14 @@ const ACT = {
   newGorev: d => gorevSheet(d.mid),
   newBilgi: d => bilgiSheet(d.mid),
   topluBilgi: () => topluBilgiFlow(),
+  veriYukle: d => veriYukleFlow(d.mid || null),
+  veriAc: d => veriAc(d.id),
+  veriSil: async d => {
+    const v = S.items.get(d.id);
+    if (!confirm(`“${v.ad}” silinsin mi? Bu işlem geri alınamaz.`)) return;
+    await removeItems([v.id], [v.fileId]);
+    closeSheet(); render();
+  },
   editBilgi: d => { const b = S.items.get(d.id); bilgiSheet(b.mid, b); },
   delBilgi: async d => {
     if (!confirm('Bu bilgi isteme yazısı silinsin mi?')) return;
