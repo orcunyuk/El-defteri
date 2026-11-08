@@ -385,3 +385,8 @@ details.more .info-grid { margin-top: 10px; }
 .belge-not li { padding-left: 16px; position: relative; }
 .belge-not li::before { content: "•"; position: absolute; left: 4px; color: var(--accent); font-weight: 700; }
 .belge-not li span { display: block; color: var(--muted); font-size: 12px; }
+
+.kalan-not { display: block; flex-basis: 100%; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 3px; }
+.ibox-btns { background: none; padding: 0; }
+.ibox-btns .btn { display: inline-flex; align-items: center; gap: 6px; }
+.ek-uyari .btn-row { margin: 8px 0 0; }

@@ -569,6 +569,9 @@ const MUKELLEF_SURESI = /ibraz|cevap|bilgi\s*iste|ek\s*sure|itiraz|izah|uzlasma|
 const gorevMali = g => typeof g.mali === 'boolean' ? g.mali : MUKELLEF_SURESI.test(TR_FOLD(g.baslik || ''));
 const gorevSon = g => etkinTarih(g.tarih, { mali: gorevMali(g) });
 const bitisSon = m => etkinTarih(m.bitisTarihi, { mali: false });
+// Bitişe 15 gün (veya daha az) kala, ek süre istenmediyse uyarı
+const EK_SURE_GUN = 15;
+const ekSureUyari = m => isAktif(m) && m.bitisTarihi && !m.ekSureIstendi && daysUntil(bitisSon(m)) <= EK_SURE_GUN;
 function bilgiSonGun(b) {
   if (!b.tebligTarihi) return '';
   return sonIsGunu(addDays(b.tebligTarihi, +(b.sureGun || 15))).tarih;
@@ -586,7 +589,9 @@ function acikSureler() {
   const ms = all('mukellef').filter(isAktif);
   const ids = new Set(ms.map(m => m.id));
   return [
-    ...ms.filter(m => m.bitisTarihi).map(m => ({ d: bitisSon(m), href: `#/m/${m.id}/sureler`, title: 'İnceleme bitiş süresi', sub: `${kisaAd(m)} · ${fmtD(bitisSon(m))}`, m })),
+    ...ms.filter(m => m.bitisTarihi).map(m => ekSureUyari(m)
+      ? { d: bitisSon(m), href: `#/m/${m.id}`, title: '⚠️ Ek süre iste', sub: `${kisaAd(m)} · bitiş ${fmtD(bitisSon(m))}`, m, ek: true }
+      : { d: bitisSon(m), href: `#/m/${m.id}/sureler`, title: 'İnceleme bitiş süresi', sub: `${kisaAd(m)} · ${fmtD(bitisSon(m))}`, m }),
     ...all('gorev').filter(g => !g.bitti && ids.has(g.mid) && g.tarih).map(g => ({ d: gorevSon(g), href: `#/m/${g.mid}/sureler`, title: g.baslik, sub: `${S.items.get(g.mid) ? kisaAd(S.items.get(g.mid)) : ''} · ${fmtD(gorevSon(g))}`, g })),
     ...all('bilgi').filter(b => !b.cevapTarihi && b.tebligTarihi && ids.has(b.mid)).map(b => {
       const m = S.items.get(b.mid), d = bilgiSonGun(b);
@@ -597,7 +602,7 @@ function acikSureler() {
 }
 function sureBox(a) {
   const n = daysUntil(a.d);
-  const tone = n < 0 ? 'red' : n <= 3 ? 'orange' : 'green';
+  const tone = n < 0 ? 'red' : (n <= 3 || a.ek) ? 'orange' : 'green';
   const mm = a.m || S.items.get(a.g?.mid || a.mid);
   const unvan = mm ? kisaAd(mm) : '';
   return `<a class="sbox ${tone}" href="${a.href}">
@@ -697,9 +702,14 @@ function renderDetail(id) {
         ${box('Adı / Unvanı', m.unvan, { full: true, empty: true })}
         ${box('VKN', m.vkn, { empty: true })}${box('İnceleme yılı', m.donem, { empty: true })}
         ${box('Vergi dairesi', m.vergiDairesi, { empty: true })}${box('İnceleme', inc, { empty: true })}
-        ${m.bitisTarihi ? box('Bitiş süresi', `<span>${kaymaHTML(m.bitisTarihi, { mali: false })}</span> ${isAktif(m) ? badge(bitisSon(m)) : ''}`, { raw: true, full: true }) : ''}
+        ${m.bitisTarihi ? box('Bitiş süresi', `<span>${kaymaHTML(m.bitisTarihi, { mali: false })}</span> ${isAktif(m) ? (ekSureUyari(m) && daysUntil(bitisSon(m)) > 3 ? badge(bitisSon(m)).replace('badge ok', 'badge warn') : badge(bitisSon(m))) : ''}${m.kalanGun ? `<small class="kalan-not">${fmtD(m.kalanGunTarihi)} itibarıyla ${esc(m.kalanGun)} gün girildi</small>` : ''}`, { raw: true, full: true })
+          : isAktif(m) ? box('Bitiş süresi', `<button class="btn link sm" data-act="editM" data-id="${id}">Kalan gün sayısını gir</button>`, { raw: true, full: true }) : ''}
+        ${isAktif(m) && m.bitisTarihi ? `<div class="ibox full ibox-btns"><button class="btn sm" data-act="icsBitis" data-mid="${id}">${I.cal} Takvime ekle (15 gün önce hatırlat)</button></div>` : ''}
         ${isAktif(m) ? '' : box('Durum', 'Kapandı', { full: true })}
       </div>
+      ${ekSureUyari(m) ? `<div class="banner warn ek-uyari"><b>Ek süre iste:</b> İnceleme bitişine ${relDays(daysUntil(bitisSon(m)))} (${fmtD(bitisSon(m))}).
+        <div class="btn-row"><button class="btn sm" data-act="ekIstendi" data-id="${id}">Ek süre istedim</button><button class="btn sm" data-act="editM" data-id="${id}">Yeni kalan günü gir</button></div></div>` : ''}
+      ${m.ekSureIstendi && isAktif(m) ? `<p class="hint">Ek süre ${fmtD(m.ekSureIstendi)} tarihinde istendi. Onaylanınca yeni kalan gün sayısını <b>Düzenle</b>'den gir.</p>` : ''}
       ${[m.tckn, m.isEmriNo, m.isEmriTarihi, m.baslamaTarihi, m.adres, m.faaliyet].some(Boolean) ? `<details class="more"><summary>Diğer bilgiler</summary><div class="info-grid">
         ${box('TCKN', m.tckn)}${box('Başlama', fmtD(m.baslamaTarihi))}
         ${box('İş emri', [m.isEmriNo, fmtD(m.isEmriTarihi)].filter(Boolean).join(' · '), { full: true })}
@@ -755,8 +765,9 @@ async function importPaket(obj) {
   const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
   // Var olan dosyada dolu alanların üzerine yazılmaz; yalnızca boşlar doldurulur
   for (const k of M_FIELDS) if (p[k] && !item[k]) item[k] = String(p[k]).trim();
+  const pk = parseInt(p.kalanGun, 10);
+  if (pk >= 0 && !item.bitisTarihi) { item.kalanGun = String(pk); item.kalanGunTarihi = today(); item.bitisTarihi = addDays(today(), pk); }
   if (p.not && !(item.not || '').includes(p.not.trim())) item.not = [item.not, p.not.trim()].filter(Boolean).join('\n\n');
-  if (item.baslamaTarihi && !item.bitisTarihi) item.bitisTarihi = addMonths(item.baslamaTarihi, item.incelemeTuru === 'sinirli' ? 6 : 12);
   item.kisiler = mergeKisiler(item.kisiler, obj.kisiler || []);
   await save(item);
   const n = { gorev: 0, kayit: 0 };
@@ -827,14 +838,20 @@ function mukellefSheet(m = null) {
     <div class="row2">${field('İnceleme yılı', 'donem', v.donem, { placeholder: 'ör. 2024' })}${field('Vergi dairesi', 'vergiDairesi', v.vergiDairesi)}</div>
     <div class="row2">${select('İnceleme türü', 'incelemeTuru', v.incelemeTuru, Object.entries(INC_TUR))}${field('Vergi türü', 'vergiTuru', v.vergiTuru, { placeholder: 'ör. KDV' })}</div>
     <div class="row2">${field('İş emri sayısı', 'isEmriNo', v.isEmriNo)}${field('İş emri tarihi', 'isEmriTarihi', v.isEmriTarihi, { type: 'date' })}</div>
-    <div class="row2">${field('İncelemeye başlama', 'baslamaTarihi', v.baslamaTarihi, { type: 'date' })}${field('Bitiş süresi', 'bitisTarihi', v.bitisTarihi, { type: 'date' })}</div>
-    <p class="hint">Bitiş süresi başlama tarihine göre önerilir (VUK 140: tam 12 ay, sınırlı 6 ay; ek süre hariç). Kontrol et.</p>
+    ${field('İncelemeye başlama', 'baslamaTarihi', v.baslamaTarihi, { type: 'date' })}
+    <div class="row2">${field('Kalan gün (sistemdeki)', 'kalanGun', '', { inputmode: 'numeric', placeholder: 'ör. 90' })}${field('Bitiş tarihi', 'bitisTarihi', v.bitisTarihi, { type: 'date' })}</div>
+    <p class="hint" id="kalanHint">Sistemde görünen kalan gün sayısını yaz; bitiş tarihi bugünden sayılarak hesaplanır. Bitişe ${EK_SURE_GUN} gün kala “Ek süre iste” uyarısı çıkar.</p>
     ${textarea('Adres', 'adres', v.adres, 2)}
     ${field('Faaliyet', 'faaliyet', v.faaliyet)}
     ${m ? '' : '<p class="hint">Telefonları dosyayı kaydettikten sonra “Telefonlar → + Ekle” ile eklersin.</p>'}`,
   { onSubmit: async (f, fd) => {
     const item = m ? { ...m } : { id: uid(), kind: 'mukellef', durum: 'aktif', kisiler: [] };
+    const eskiBitis = item.bitisTarihi || '';
     for (const k of ['unvan', 'kisaAd', 'vkn', 'tckn', 'donem', 'vergiDairesi', 'incelemeTuru', 'vergiTuru', 'isEmriNo', 'isEmriTarihi', 'baslamaTarihi', 'bitisTarihi', 'adres', 'faaliyet']) item[k] = String(fd.get(k) ?? '').trim();
+    const kg = parseInt(String(fd.get('kalanGun') || '').replace(/\D/g, ''), 10);
+    if (kg >= 0) { item.kalanGun = String(kg); item.kalanGunTarihi = today(); }
+    else if (item.bitisTarihi !== eskiBitis) { delete item.kalanGun; delete item.kalanGunTarihi; }
+    if (item.bitisTarihi !== eskiBitis) delete item.ekSureIstendi; // yeni süre girildi: uyarı yeniden çalışır
     if (foundKisi.length) item.kisiler = mergeKisiler(item.kisiler, foundKisi);
     await save(item);
     if (foundKisi.length) toast(`${foundKisi.length} kişi / telefon eklendi`);
@@ -880,14 +897,16 @@ function mukellefSheet(m = null) {
   };
   const onizle = () => { const k = kisaAd({ unvan: e.unvan.value, kisaAd: e.kisaAd.value.trim() }); $('#kisaOnizle').textContent = k && k !== e.unvan.value.trim() ? 'Listede görünecek: ' + k : ''; };
   e.unvan.addEventListener('input', onizle); e.kisaAd.addEventListener('input', onizle); onizle();
-  const auto = () => {
-    if (!e.baslamaTarihi.value || (e.bitisTarihi.value && !e.bitisTarihi.dataset.auto)) return;
-    e.bitisTarihi.value = addMonths(e.baslamaTarihi.value, e.incelemeTuru.value === 'sinirli' ? 6 : 12);
-    e.bitisTarihi.dataset.auto = '1';
-  };
-  e.baslamaTarihi.addEventListener('change', auto);
-  e.incelemeTuru.addEventListener('change', auto);
-  e.bitisTarihi.addEventListener('input', () => delete e.bitisTarihi.dataset.auto);
+  // Kalan gün yazılınca bitiş tarihi = bugün + kalan gün
+  const kalanHint = $('#kalanHint'), hintIlk = kalanHint.innerHTML;
+  e.kalanGun.addEventListener('input', () => {
+    const n = parseInt(e.kalanGun.value.replace(/\D/g, ''), 10);
+    if (!(n >= 0)) { kalanHint.innerHTML = hintIlk; return; }
+    e.bitisTarihi.value = addDays(today(), n);
+    const r = sonIsGunu(e.bitisTarihi.value, { mali: false });
+    kalanHint.innerHTML = `Bitiş: <b>${fmtD(e.bitisTarihi.value)}</b>${r.tarih !== e.bitisTarihi.value ? ` → <b>${fmtD(r.tarih)}</b> (${esc(r.nedenler.join(' ve '))})` : ''}. Ek süre uyarısı: <b>${fmtD(addDays(r.tarih, -EK_SURE_GUN))}</b>.`;
+  });
+  e.bitisTarihi.addEventListener('input', () => { e.kalanGun.value = ''; kalanHint.innerHTML = hintIlk; });
 }
 
 function kisiSheet(mid, kid) {
@@ -1421,14 +1440,14 @@ function gorevSheet(mid, g = null) {
   gosterSon();
   form.querySelector('.chips').onclick = e => { const n = e.target.dataset.plus; if (n) { form.elements.tarih.value = addDays(today(), +n); gosterSon(); } };
 }
-function icsFile(uidStr, date, title) {
+function icsFile(uidStr, date, title, ekAlarm = []) {
   const esc2 = s => s.replace(/[\\;,]/g, c => '\\' + c).replace(/\n/g, '\\n');
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
-  const alarm = trig => ['BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + esc2(title), 'TRIGGER:' + trig, 'END:VALARM'];
+  const alarm = (trig, t = title) => ['BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + esc2(t), 'TRIGGER:' + trig, 'END:VALARM'];
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//El Defteri//TR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
     'BEGIN:VEVENT', `UID:${uidStr}@el-defteri`, `DTSTAMP:${stamp}`,
     `DTSTART;VALUE=DATE:${date.replace(/-/g, '')}`, `DTEND;VALUE=DATE:${addDays(date, 1).replace(/-/g, '')}`,
-    'SUMMARY:' + esc2(title), ...alarm('-PT15H'), ...alarm('PT9H'), 'END:VEVENT', 'END:VCALENDAR'];
+    'SUMMARY:' + esc2(title), ...ekAlarm.flatMap(([t, d]) => alarm(t, d)), ...alarm('-PT15H'), ...alarm('PT9H'), 'END:VEVENT', 'END:VCALENDAR'];
   const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' });
   const u = URL.createObjectURL(blob);
   const a = Object.assign(document.createElement('a'), { href: u, download: 'sure.ics' });
@@ -1474,7 +1493,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 23</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 24</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
@@ -1662,7 +1681,8 @@ const ACT = {
     closeSheet(); render();
   },
   icsGorev: d => { const g = S.items.get(d.id); icsFile(g.id, gorevSon(g), `${dosyaEtiket(S.items.get(g.mid))}: ${g.baslik}`); },
-  icsBitis: d => { const m = S.items.get(d.mid); icsFile(m.id + '-bitis', bitisSon(m), `${dosyaEtiket(m)}: İnceleme bitiş süresi`); },
+  icsBitis: d => { const m = S.items.get(d.mid); icsFile(m.id + '-bitis', bitisSon(m), `${dosyaEtiket(m)}: İnceleme bitiş süresi`, [[`-P${EK_SURE_GUN}D`, `${dosyaEtiket(m)}: Ek süre iste (bitişe ${EK_SURE_GUN} gün)`], ['-P3D', `${dosyaEtiket(m)}: İnceleme bitişine 3 gün`]]); },
+  ekIstendi: async d => { const m = S.items.get(d.id); await save({ ...m, ekSureIstendi: today() }); toast('Not edildi'); render(); },
   exportBackup: async (d, el) => {
     el.disabled = true; el.textContent = 'Hazırlanıyor…';
     try {

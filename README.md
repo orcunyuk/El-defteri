@@ -8,7 +8,7 @@ Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
 - **Süre hesabı:** Bütün sürelerde son gün hafta sonu ya da resmî tatile denk gelirse izleyen iş gününe alınır (VUK 18). Mali tatil (1–20 Temmuz) yalnızca mükellef sürelerine uygulanır: bilgi isteme cevap süreleri ve 'Mükellefin süresi' işaretli süreler (ibraz, cevap, ek süre, itiraz, izahat vb. başlıklarda kendiliğinden işaretlenir). İnceleme bitiş süresi ve idarenin işlerine (rapor teslimi, tutanak vb.) uygulanmaz. Kayma ve nedeni ekranda gösterilir.
 - **Toplu yazı yükleme:** Ana sayfadaki "Bilgi isteme yazılarını yükle" ile birden çok yazı tek seferde seçilir. Her yazı okunup ait olduğu dosya bulunur: mükellefe yazılanlar VKN/TCKN'den, karşıt yazılar metindeki incelenen mükellefin adı ya da VKN'sinden. Kaydetmeden önce kontrol listesi gösterilir; eşleşmeyenler için dosya seçilir ya da atlanır, aynı sayılı yazılar tekrar kaydedilmez.
 - **İnceleme verileri:** Ana sayfadaki "İnceleme verileri" kutusuyla sıkıştırılmış dosyalar (ZIP; RAR/7z yalnızca adla eşleşir) yüklenir. Arşivin içindeki dosya adları ve metin/CSV/XML/Excel/PDF içerikleri cihazda taranıp VKN/TCKN ya da unvana göre ilgili mükellef bulunur; kontrol listesinden sonra mükellefin dosyasında "İnceleme verileri" altında şifreli saklanır, buluta eşitlenir ve istenince cihaza indirilir. Dosya başına sınır 150 MB. Bu arşivler yedek dosyasına alınmaz (bulutta durur).
-- **Mükellef dosyaları:** Unvan, VKN, vergi dairesi, inceleme türü ve dönemi, iş emri bilgileri, başlama ve bitiş süresi (VUK 140'a göre öneri), adres ve kişiler (tek dokunuşla arama ya da e-posta).
+- **Mükellef dosyaları:** Unvan, VKN, vergi dairesi, inceleme türü ve dönemi, iş emri bilgileri, başlama tarihi, sistemdeki kalan gün sayısından hesaplanan bitiş tarihi (bitişe 15 gün kala "Ek süre iste" uyarısı, takvime hatırlatma), adres ve kişiler (tek dokunuşla arama ya da e-posta).
 - **Görüşme günlüğü:** Tarih, tür, görüşülen kişi, konu, yazılı not ve sesli not. Not alırken isteğe bağlı takip süresi de eklenebilir. Uygulamadan bir kişi arandığında, uygulamaya dönünce “görüşmeni not al” hatırlatması çıkar.
 - **Süreler:** Görev ve süre listesi. Ana sayfada son 7 gün kalan süreler ve son 30 gün kalan inceleme bitişleri görünür. Süreler alarmlı olarak iPhone Takvimi'ne (.ics) eklenebilir.
 - **Yedekleme:** Şifreli tek dosya yedek alınır ve geri yüklenir.
@@ -22,7 +22,7 @@ Vergi müfettişi için iPhone'da çalışan kişisel el defteri (PWA).
   "app": "el-defteri-paket", "v": 1,
   "mukellef": { "unvan": "", "kod": "", "vkn": "", "tckn": "", "vergiDairesi": "", "faaliyet": "",
                 "incelemeTuru": "tam|sinirli", "donem": "", "vergiTuru": "", "gerekce": "",
-                "isEmriNo": "", "isEmriTarihi": "YYYY-AA-GG", "baslamaTarihi": "YYYY-AA-GG", "bitisTarihi": "YYYY-AA-GG",
+                "isEmriNo": "", "isEmriTarihi": "YYYY-AA-GG", "baslamaTarihi": "YYYY-AA-GG", "bitisTarihi": "YYYY-AA-GG", "kalanGun": 90,
                 "adres": "", "not": "" },
   "kisiler":  [{ "ad": "", "rol": "", "tel": "", "eposta": "" }],
   "kayitlar": [{ "tarih": "YYYY-AA-GGTSS:DD", "tur": "telefon|yuzyuze|yazi|eposta|diger", "kisi": "", "konu": "", "metin": "" }],
