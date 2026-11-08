@@ -405,7 +405,8 @@ export function parse(text) {
     const t = lines.find(l => /beyannamesi\b/.test(fold(l)));
     if (t) baslik = [sentence(clean(t.split(COL)[0])), out.donem].filter(Boolean).join(' · ');
   }
-  return { tur, baslik, fields: out, kisiler };
+  // İş emrindeki telefon ve kişiler (imzalayan memurlar, başkan yardımcısı, daire telefonu) mükellefe ait değildir: alınmaz
+  return { tur, baslik, fields: out, kisiler: tur === 'İş emri' ? [] : kisiler };
 }
 
 /* ---------- bilgi isteme yazısı ---------- */
