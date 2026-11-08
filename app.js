@@ -330,7 +330,7 @@ const sameVault = (a, b) => a && b && cr.b64(a.wrapped) === cr.b64(b.wrapped) &&
 function lockShell(inner, { footer = true } = {}) {
   const u = cloud.currentUser();
   app.innerHTML = `<div class="lock">
-    <img src="icons/el-defteri-192.png" class="lock-icon" alt="">
+    <img src="icons/muhur-192.png" class="lock-icon" alt="">
     <h1>El Defteri</h1>
     ${inner}
     ${footer && u ? `<p class="footnote center lock-foot">${esc(u.email)} · <button class="btn link sm" data-act="signout">Çıkış yap</button></p>` : ''}
@@ -609,8 +609,7 @@ function sureBox(a) {
 }
 /* ---------- ＋ düğmesi: yukarı açılan ekleme menüsü ---------- */
 const EKLE = [
-  ['newM', 'Yeni mükellef', 'Elle veya iş emrinden', 'mavi', svg('<circle cx="10" cy="8" r="4"/><path d="M2 21a8 8 0 0 1 13-6M19 14v6M16 17h6"/>')],
-  ['paket', 'Hazır paket', '.eldefteri.json', 'mor', svg('<path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/>')],
+  ['newM', 'Yeni mükellef', 'Belgeden, paketten veya elle', 'mavi', svg('<circle cx="10" cy="8" r="4"/><path d="M2 21a8 8 0 0 1 13-6M19 14v6M16 17h6"/>')],
   ['topluBilgi', 'Bilgi isteme yazıları', 'PDF veya fotoğraf', 'yesil', svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>')],
   ['veriYukle', 'İnceleme verileri', 'ZIP, RAR, 7z', 'turuncu', svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 4v4h4V4M12 11v6M9 14l3-3 3 3"/>')],
 ];
@@ -808,6 +807,7 @@ function mukellefSheet(m = null) {
   const form = openSheet(m ? 'Dosyayı düzenle' : 'Yeni dosya', `
     <div class="autofill">
       <button type="button" class="btn primary block" data-autofill>${I.doc} Belgeden doldur</button>
+      ${m ? '' : '<button type="button" class="btn block" data-act="paket">📦 Hazır paketi içe aktar</button>'}
       <div class="belge-not">
         <b>Yüklenecek belgeler</b> <small>(birlikte seçebilirsin)</small>
         <ul>
@@ -1474,7 +1474,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 21</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 22</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
