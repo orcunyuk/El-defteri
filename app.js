@@ -998,15 +998,18 @@ async function topluBilgiFlow() {
     let text = '';
     try { text = await extractText(f, msg => { const e2 = $('#topluDurum'); if (e2) e2.textContent = `${n + 1}/${files.length} · ${f.name}: ${msg}`; }); } catch (err) { console.error(err); }
     const m = text.trim() ? mukellefBul(text) : null;
-    const r = parseBilgi(text, m ? { vkn: m.vkn, tckn: m.tckn } : {});
+    const r = parseBilgi(text, m ? { vkn: m.vkn, tckn: m.tckn, ad: adAnahtar(m) } : {});
     if (m && !r.muhatap) r.muhatap = 'mukellef';
     if (r.muhatap === 'mukellef') { delete r.muhatapAd; delete r.muhatapVkn; }
-    const kayitli = m && r.sayi && byM('bilgi', m.id).some(x => x.sayi === r.sayi);
-    sonuc.push({ ad: f.name, okundu: !!text.trim(), m, r, kayitli, text });
+    const eski = m && r.sayi ? byM('bilgi', m.id).find(x => x.sayi === r.sayi) : null;
+    // Daha önce muhatabı yanlış (mükellefin kendisi) kaydedilmiş yazı: yalnızca muhatap düzeltilir
+    const duzelt = eski && r.muhatap === 'diger' && (eski.muhatap !== 'diger' || (!eski.muhatapAd && r.muhatapAd)) ? eski : null;
+    const kayitli = !!eski && !duzelt;
+    sonuc.push({ ad: f.name, okundu: !!text.trim(), m, r, kayitli, duzelt, text });
   }
   const ms = all('mukellef').sort((a, b) => coll.compare(kisaAd(a), kisaAd(b)));
   const satir = (x, i) => {
-    const etiket = !x.okundu ? ['bad', 'Okunamadı'] : x.kayitli ? ['done', 'Zaten kayıtlı'] : x.m ? ['ok', 'Eşleşti'] : ['warn', 'Dosya seç'];
+    const etiket = !x.okundu ? ['bad', 'Okunamadı'] : x.kayitli ? ['done', 'Zaten kayıtlı'] : x.duzelt ? ['ok', 'Muhatap düzeltilecek'] : x.m ? ['ok', 'Eşleşti'] : ['warn', 'Dosya seç'];
     const muh = x.r.muhatap === 'diger' ? `Karşıt: ${x.r.muhatapAd ? kisaAd({ unvan: x.r.muhatapAd }) : 'başka mükellef'}${x.r.muhatapVkn ? ' (' + x.r.muhatapVkn + ')' : ''}` : 'Mükellefe';
     return `<div class="tyazi">
       <div class="ty-head"><b>${esc(x.ad)}</b><span class="badge ${etiket[0]}">${etiket[1]}</span></div>
@@ -1018,8 +1021,9 @@ async function topluBilgiFlow() {
     </div>`;
   };
   const eslesen = sonuc.filter(x => x.m && !x.kayitli).length;
+  const duzeltilen = sonuc.filter(x => x.duzelt).length;
   openSheet('Yazıları kaydet', `
-    <p class="card">${sonuc.length} yazı okundu. <b>${eslesen}</b> tanesi bir dosyayla eşleşti${sonuc.length - eslesen ? `; ${sonuc.length - eslesen} tanesi için dosya seç ya da atla` : ''}. Tebliğ tarihleri e-tebligat kuralına göre hesaplanır (gönderim = yazı tarihi).</p>
+    <p class="card">${sonuc.length} yazı okundu. <b>${eslesen}</b> tanesi bir dosyayla eşleşti${sonuc.length - eslesen ? `; ${sonuc.length - eslesen} tanesi için dosya seç ya da atla` : ''}.${duzeltilen ? ` ${duzeltilen} kayıtlı yazının muhatabı düzeltilecek.` : ''} Tebliğ tarihleri e-tebligat kuralına göre hesaplanır (gönderim = yazı tarihi).</p>
     ${sonuc.map(satir).join('')}`,
   { submitLabel: 'Kaydet', onSubmit: async (f, fd) => {
     let n = 0;
@@ -1028,8 +1032,12 @@ async function topluBilgiFlow() {
       if (!mid || !x.okundu) continue;
       const m = S.items.get(mid);
       // Seçilen dosya otomatik eşleşmeden farklıysa muhatabı o dosyaya göre yeniden belirle
-      const r = (x.m?.id === mid) ? x.r : parseBilgi(x.text, { vkn: m.vkn, tckn: m.tckn });
-      const karsit = r.muhatap === 'diger' && r.muhatapVkn && r.muhatapVkn !== m.vkn && r.muhatapVkn !== m.tckn;
+      const r = (x.m?.id === mid) ? x.r : parseBilgi(x.text, { vkn: m.vkn, tckn: m.tckn, ad: adAnahtar(m) });
+      const karsit = r.muhatap === 'diger' && !(r.muhatapVkn && (r.muhatapVkn === m.vkn || r.muhatapVkn === m.tckn));
+      if (x.duzelt && x.m?.id === mid) {
+        await save({ ...x.duzelt, muhatap: 'diger', muhatapAd: r.muhatapAd || '', muhatapVkn: r.muhatapVkn || '' });
+        n++; continue;
+      }
       const gonderim = r.yaziTarihi || today();
       await save({ id: uid(), kind: 'bilgi', mid, muhatap: karsit ? 'diger' : 'mukellef', muhatapAd: karsit ? (r.muhatapAd || '') : '', muhatapVkn: karsit ? r.muhatapVkn : '',
         sayi: r.sayi || '', yaziTarihi: r.yaziTarihi || '', konu: r.konu || '', sureGun: r.sureGun || 15, cevapTarihi: '', cevapNot: '',
@@ -1260,7 +1268,7 @@ function bilgiSheet(mid, b = null) {
         try { text += '\n' + await extractText(f, msg => { status.textContent = `${f.name}: ${msg}`; }); } catch (err) { console.error(err); }
       }
       const m = S.items.get(mid) || {};
-      const r = parseBilgi(text, { vkn: m.vkn, tckn: m.tckn });
+      const r = parseBilgi(text, { vkn: m.vkn, tckn: m.tckn, ad: adAnahtar(m) });
       // VKN bulunamadıysa adı dosyadaki unvanla karşılaştır
       if (!r.muhatap && r.muhatapAdi) {
         const ilk = fold(String(m.unvan || '').split(/\s+/)[0] || '');
@@ -1504,7 +1512,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 29</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 30</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();

@@ -451,6 +451,33 @@ export function parseBilgi(text, dosya = {}) {
     if (m) { const n = idNumber(l.slice(m.index + m[0].length - m[1].length, m.index + m[0].length)); if (n) nums.push({ n, line: lines.indexOf(l) }); }
   }
   const benim = new Set([dosya.vkn, dosya.tckn].filter(Boolean));
+  // Hitap bloğu: Konu/İlgi satırlarından sonra, metin gövdesi başlayana kadar olan satırlar ("… MÜDÜRLÜĞÜNE", "Sayın …")
+  const kIdx = lines.findIndex(l => /^konu\b/.test(fold(l)));
+  const hitap = [];
+  if (kIdx >= 0) {
+    for (let j = kIdx + 1; j < Math.min(lines.length, kIdx + 9); j++) {
+      const f = fold(lines[j]);
+      if (/^ilgi\b|^[a-z]\)\s/.test(f) && !hitap.length) continue;
+      if (/nezdinde|ilgili\s+olarak|uyarinca|gerekmektedir|rica\s+ederim|maddesi|hakkinda\s+yurutulen|incelemesi|kanunu/.test(f) || (lines[j].length > 90 && !isUpper(lines[j]))) break;
+      hitap.push(lines[j]);
+    }
+  }
+  const hitapNums = nums.filter(x => x.line > kIdx && x.line <= kIdx + 1 + hitap.length + 2 && hitap.some(h => lines[x.line] === h));
+  // Hitapta mükellefin kendi numarası yoksa ve hitapta bir ad varsa: yazı başkasına (karşıt, banka, hastane…) gönderilmiştir
+  const hitapAd = (() => {
+    const adSatir = hitap.find(h => hasWord(h.replace(/^t\.?\s?c\.?\s*/i, '')) && !/^(adres|mah|cad|sok|no\b)/.test(fold(h)) && !/\b(mah(?:allesi)?|cad(?:desi)?|sok(?:ak|agi)?|bulvari?)\b\.?/.test(fold(h)));
+    if (!adSatir) return '';
+    // "…MÜDÜRLÜĞÜNE" → "…MÜDÜRLÜĞÜ", "…A.Ş.'NE" → "…A.Ş."; ada ait "KAYA" gibi sonlara dokunulmaz
+    return clean(adSatir.replace(/^sayın\s+/i, '').replace(/^t\.?\s?c\.?\s+(?=\S+\s+\S)/i, '').replace(/\(.*?(?:vkn|vergi|tckn|kimlik).*?\)/i, '').replace(/(?:vkn|tckn|vergi\s+kimlik).*$/i, '')
+      .replace(/(?:['’]\s*(?:NE|NA|YE|YA|ne|na|ye|ya)|(?<=[ĞG][IİUÜ])N[AE])\s*$/u, ''));
+  })();
+  const adBenim = dosya.ad && hitapAd && fold(hitapAd).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').includes(dosya.ad);
+  if (hitapNums.length || hitapAd) {
+    const hy = hitapNums.find(x => !benim.has(x.n));
+    if (hy) { out.muhatap = 'diger'; out.muhatapVkn = hy.n; if (hitapAd) out.muhatapAd = hitapAd; return out; }
+    if (hitapNums.length || adBenim) { out.muhatap = 'mukellef'; return out; }
+    if (benim.size || dosya.ad) { out.muhatap = 'diger'; out.muhatapAd = hitapAd; const dn = nums.find(x => !benim.has(x.n)); if (dn) out.muhatapVkn = dn.n; return out; }
+  }
   const yabanci = nums.find(x => !benim.has(x.n));
   if (yabanci) { out.muhatap = 'diger'; out.muhatapVkn = yabanci.n; }
   else if (nums.length) out.muhatap = 'mukellef';
