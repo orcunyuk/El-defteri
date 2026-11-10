@@ -387,7 +387,7 @@ details.more .info-grid { margin-top: 10px; }
 .ty-sub { font-size: 13px; color: var(--muted); margin: 0 2px 8px; line-height: 1.35; }
 
 /* ---------- ana sayfa: yükleme kutuları ---------- */
-.row-ico.arsiv { background: var(--fill); font-size: 17px; }
+.row-ico.arsiv, .row-ico.aktarim { background: var(--fill); font-size: 17px; }
 .ty-sub.mt6 { margin-top: 6px; }
 
 /* Yeni dosya: yüklenecek belgeler notu */

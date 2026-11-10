@@ -622,6 +622,7 @@ const EKLE = [
   ['newM', 'Yeni mükellef', 'Belgeden, paketten veya elle', 'mavi', svg('<circle cx="10" cy="8" r="4"/><path d="M2 21a8 8 0 0 1 13-6M19 14v6M16 17h6"/>')],
   ['topluBilgi', 'Bilgi isteme yazıları', 'PDF veya fotoğraf', 'yesil', svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>')],
   ['veriYukle', 'İnceleme verileri', 'ZIP, RAR, 7z', 'turuncu', svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 4v4h4V4M12 11v6M9 14l3-3 3 3"/>')],
+  ['aktarimYukle', 'Dosya aktar', 'Diğer cihazından indirmek için', 'mor', svg('<path d="M7 7h11l-3-3M17 17H6l3 3"/>')],
 ];
 function ekleMenu() {
   const fab = $('.fab');
@@ -659,6 +660,7 @@ function renderHome() {
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
       <div id="mlist"></div>
       ${alerts.length ? `<h2 class="sec">Yaklaşan süreler</h2><div class="box-grid">${alerts.map(sureBox).join('')}</div>` : ''}
+      ${aktarimHTML()}
       ${banners.join('')}
     </div>
     <button class="fab" data-act="ekleMenu" aria-label="Ekle" aria-expanded="false">${I.plus}</button>${tabbar('dosyalar')}`;
@@ -1138,6 +1140,31 @@ async function veriYukleFlow(mid = null) {
     toast(`${n} arşiv kaydedildi`);
   } });
 }
+/* ---------- dosya aktarımı: cihazlar arası geçici dosyalar (mükellefe bağlı değil) ---------- */
+async function aktarimFlow() {
+  const files = await pickFiles('');
+  if (!files.length) return;
+  const buyuk = files.filter(f => f.size > VERI_SINIR);
+  if (buyuk.length) toast(`${buyuk.map(f => f.name).join(', ')} 150 MB'tan büyük; eklenmedi`);
+  const secilen = files.filter(f => f.size <= VERI_SINIR);
+  if (!secilen.length) return;
+  toast(`${secilen.length} dosya şifreleniyor…`);
+  for (const f of secilen) {
+    const fileId = uid();
+    await saveFile(fileId, await f.arrayBuffer());
+    await save({ id: uid(), kind: 'aktarim', ad: f.name, size: f.size, mime: f.type || 'application/octet-stream', fileId });
+  }
+  toast(cloudOn() ? `${secilen.length} dosya eklendi; diğer cihazlarında “Aktarılan dosyalar”da görünecek` : `${secilen.length} dosya eklendi`);
+  render();
+}
+function aktarimHTML() {
+  const as = all('aktarim').sort((a, b) => b.created - a.created);
+  if (!as.length) return '';
+  return `<h2 class="sec">Aktarılan dosyalar</h2><div class="list">${as.map(v => `<button class="row" data-act="veriAc" data-id="${v.id}">
+      <span class="row-ico aktarim">📎</span>
+      <div class="row-main"><div class="row-title wrap">${esc(v.ad)}</div><div class="row-sub">${fmtSize(v.size)} · ${fmtTs(v.created)}</div></div>${I.chev}</button>`).join('')}</div>
+    <p class="footnote">Diğer cihazına geçirmek için eklediğin dosyalar. İşin bitince silebilirsin.</p>`;
+}
 function verilerHTML(m) {
   const vs = byM('veri', m.id).sort((a, b) => b.created - a.created);
   return `<div class="sec-row"><h2 class="sec">İnceleme verileri</h2><button class="btn link sm" data-act="veriYukle" data-mid="${m.id}">+ Ekle</button></div>
@@ -1512,7 +1539,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 30</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 31</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
@@ -1547,7 +1574,7 @@ async function drawUyeler() {
 async function buildBackup() {
   const items = await db.getAll('items');
   // İnceleme verisi arşivleri yedek dosyasına alınmaz (çok büyük olabilir; bulutta ayrıca saklanır)
-  const arsivler = new Set(all('veri').map(v => v.fileId));
+  const arsivler = new Set([...all('veri'), ...all('aktarim')].map(v => v.fileId));
   const files = (await db.getAll('files')).filter(f => !arsivler.has(f.id));
   const obj = {
     app: 'el-defteri', v: 1, createdAt: new Date().toISOString(), vault: cr.vaultToJSON(S.vault),
@@ -1681,6 +1708,7 @@ const ACT = {
   topluBilgi: () => topluBilgiFlow(),
   veriYukle: d => veriYukleFlow(d.mid || null),
   veriAc: d => veriAc(d.id),
+  aktarimYukle: () => aktarimFlow(),
   veriSil: async d => {
     const v = S.items.get(d.id);
     if (!confirm(`“${v.ad}” silinsin mi? Bu işlem geri alınamaz.`)) return;
