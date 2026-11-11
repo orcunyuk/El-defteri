@@ -605,6 +605,17 @@ function acikSureler() {
     }),
   ].sort((a, b) => a.d.localeCompare(b.d));
 }
+// Ana ekranda tek satırlık süre; dokununca ayrıntısı (görev / yazı) açılır
+function sureSatir(a) {
+  const n = daysUntil(a.d);
+  const tone = n < 0 ? 'red' : (n <= 3 || a.ek) ? 'orange' : 'green';
+  const mm = a.m || S.items.get(a.g?.mid || a.mid);
+  const hedef = a.g ? `data-act="editGorev" data-id="${a.g.id}"` : a.b ? `data-act="editBilgi" data-id="${a.b.id}"` : `data-href="${a.href}"`;
+  return `<button class="sure-row" ${hedef} ${a.g || a.b ? '' : 'data-act="git"'}>
+    <span class="sure-dot ${tone}"></span>
+    <span class="sure-tx"><b>${esc(a.title)}</b><small>${esc([mm ? kisaAd(mm) : '', fmtD(a.d)].filter(Boolean).join(' · '))}</small></span>
+    <span class="sure-bd ${tone}">${relDays(n)}</span>${I.chev}</button>`;
+}
 function sureBox(a) {
   const n = daysUntil(a.d);
   const tone = n < 0 ? 'red' : (n <= 3 || a.ek) ? 'orange' : 'green';
@@ -659,7 +670,8 @@ function renderHome() {
       <label class="search">${I.search}<input id="q" type="search" placeholder="Unvan veya VKN ara" value="${esc(S.q)}"></label>
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
       <div id="mlist"></div>
-      ${alerts.length ? `<h2 class="sec">Yaklaşan süreler</h2><div class="box-grid">${alerts.map(sureBox).join('')}</div>` : ''}
+      ${alerts.length ? `<div class="sec-row"><h2 class="sec">Yaklaşan süreler</h2><a class="btn link sm" href="#/sureler">Tümü</a></div>
+        <div class="list sure-list">${alerts.slice(0, 3).map(sureSatir).join('')}${alerts.length > 3 ? `<a class="sure-more" href="#/sureler">Tümünü gör (${alerts.length})</a>` : ''}</div>` : ''}
       ${aktarimHTML()}
       ${banners.join('')}
     </div>
@@ -1539,7 +1551,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 31</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 32</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
@@ -1708,6 +1720,7 @@ const ACT = {
   topluBilgi: () => topluBilgiFlow(),
   veriYukle: d => veriYukleFlow(d.mid || null),
   veriAc: d => veriAc(d.id),
+  git: d => { location.hash = d.href; },
   aktarimYukle: () => aktarimFlow(),
   veriSil: async d => {
     const v = S.items.get(d.id);

@@ -402,3 +402,20 @@ details.more .info-grid { margin-top: 10px; }
 .ibox-btns { background: none; padding: 0; }
 .ibox-btns .btn { display: inline-flex; align-items: center; gap: 6px; }
 .ek-uyari .btn-row { margin: 8px 0 0; }
+
+/* Ana ekran: yaklaşan süreler (tek satır) */
+.sure-list { overflow: hidden; }
+.sure-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px 9px 14px; border: 0; background: none; font: inherit; color: var(--text); text-align: left; cursor: pointer; }
+.sure-row + .sure-row { box-shadow: inset 0 .5px 0 var(--sep); }
+.sure-row:active { background: var(--cell-press); }
+.sure-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.sure-dot.red { background: var(--red); } .sure-dot.orange { background: var(--orange); } .sure-dot.green { background: var(--green); }
+.sure-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sure-tx b { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sure-tx small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sure-bd { flex: none; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 8px; }
+.sure-bd.red { color: var(--red); background: rgb(255 59 48 / .14); } .sure-bd.orange { color: var(--orange); background: rgb(255 149 0 / .16); } .sure-bd.green { color: var(--green); background: rgb(52 199 89 / .16); }
+.sure-row .chev { color: var(--chev); flex: none; }
+.sure-more { display: block; text-align: center; padding: 10px; color: var(--accent); font-size: 15px; box-shadow: inset 0 .5px 0 var(--sep); }
+.sure-bd.orange { color: #b35f00; } .sure-bd.green { color: #1f7a36; }
+[data-theme=koyu] .sure-bd.orange { color: var(--orange); } [data-theme=koyu] .sure-bd.green { color: var(--green); }
