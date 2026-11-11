@@ -655,6 +655,8 @@ function ekleKapat() {
 
 function renderHome() {
   const alerts = acikSureler().filter(a => (a.m && !a.ek) ? false : daysUntil(a.d) <= (a.g ? 7 : 30));
+  // En az 5 süre; süresi geçenlerin hepsi her zaman görünür (liste tarihe göre sıralı, geçenler başta)
+  const gorunen = Math.max(5, alerts.filter(a => daysUntil(a.d) < 0).length);
   const banners = [];
   if (!isStandalone()) banners.push(`<div class="banner warn"><b>Ana ekrana ekle:</b> Safari'de <b>Paylaş → Ana Ekrana Ekle</b> ile yükleyip uygulamayı oradan aç.</div>`);
   if (S.items.size && !cloudOn() && (!S.lastBackup || Date.now() - S.lastBackup > 14 * 864e5)) {
@@ -671,7 +673,7 @@ function renderHome() {
       <div class="sec-row"><h2 class="sec">${S.filter === 'aktif' ? 'Aktif dosyalar' : 'Kapanan dosyalar'}</h2><div class="seg sm">${seg('aktif', 'Aktif')}${seg('kapandi', 'Kapanan')}</div></div>
       <div id="mlist"></div>
       ${alerts.length ? `<div class="sec-row"><h2 class="sec">Yaklaşan süreler</h2><a class="btn link sm" href="#/sureler">Tümü</a></div>
-        <div class="list sure-list">${alerts.slice(0, 3).map(sureSatir).join('')}${alerts.length > 3 ? `<a class="sure-more" href="#/sureler">Tümünü gör (${alerts.length})</a>` : ''}</div>` : ''}
+        <div class="list sure-list">${alerts.slice(0, gorunen).map(sureSatir).join('')}${alerts.length > gorunen ? `<a class="sure-more" href="#/sureler">Tümünü gör (${alerts.length})</a>` : ''}</div>` : ''}
       ${aktarimHTML()}
       ${banners.join('')}
     </div>
@@ -1551,7 +1553,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 32</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 33</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
