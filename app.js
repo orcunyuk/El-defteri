@@ -633,6 +633,7 @@ const EKLE = [
   ['newM', 'Yeni mükellef', 'Belgeden, paketten veya elle', 'mavi', svg('<circle cx="10" cy="8" r="4"/><path d="M2 21a8 8 0 0 1 13-6M19 14v6M16 17h6"/>')],
   ['topluBilgi', 'Bilgi isteme yazıları', 'PDF veya fotoğraf', 'yesil', svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3-3 3 3"/>')],
   ['veriYukle', 'İnceleme verileri', 'ZIP, RAR, 7z', 'turuncu', svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 4v4h4V4M12 11v6M9 14l3-3 3 3"/>')],
+  ['newRandevu', 'Randevu', 'Tutanak, görüşme…', 'kirmizi', svg('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4"/>')],
   ['aktarimYukle', 'Dosya aktar', 'Diğer cihazından indirmek için', 'mor', svg('<path d="M7 7h11l-3-3M17 17H6l3 3"/>')],
 ];
 function ekleMenu() {
@@ -642,7 +643,7 @@ function ekleMenu() {
   const el = document.createElement('div');
   el.className = 'dial';
   el.innerHTML = `<div class="dial-bg" data-act="ekleKapat"></div><div class="dial-list">${EKLE.map(([act, t, a, c, ic]) => {
-    const kapali = !mukellefVar && (act === 'topluBilgi' || act === 'veriYukle');
+    const kapali = !mukellefVar && (act === 'topluBilgi' || act === 'veriYukle' || act === 'newRandevu');
     return `<button class="dial-item" data-act="ekleSec" data-v="${act}"${kapali ? ' disabled' : ''}><span class="dial-lbl"><b>${t}</b><small>${kapali ? 'Önce mükellef ekle' : a}</small></span><i class="dial-ico ${c}">${ic}</i></button>`;
   }).join('')}</div>`;
   document.body.appendChild(el);
@@ -674,6 +675,9 @@ function renderHome() {
       <div id="mlist"></div>
       ${alerts.length ? `<div class="sec-row"><h2 class="sec">Yaklaşan süreler</h2><a class="btn link sm" href="#/sureler">Tümü</a></div>
         <div class="list sure-list">${alerts.slice(0, gorunen).map(sureSatir).join('')}${alerts.length > gorunen ? `<a class="sure-more" href="#/sureler">Tümünü gör (${alerts.length})</a>` : ''}</div>` : ''}
+      ${(() => { const rs = acikRandevular().filter(r => daysUntil(r.tarih) <= 14); const g = Math.max(5, rs.filter(r => daysUntil(r.tarih) < 0).length);
+        return rs.length ? `<div class="sec-row"><h2 class="sec">Randevular</h2><a class="btn link sm" href="#/sureler">Tümü</a></div>
+        <div class="list">${rs.slice(0, g).map(r => randevuSatir(r)).join('')}${rs.length > g ? `<a class="sure-more" href="#/sureler">Tümünü gör (${rs.length})</a>` : ''}</div>` : ''; })()}
       ${aktarimHTML()}
       ${banners.join('')}
     </div>
@@ -700,7 +704,7 @@ function drawMList() {
         <dt>${m.vkn || !m.tckn ? 'VKN' : 'TCKN'}</dt><dd>${esc(m.vkn || m.tckn || '—')}</dd>
         <dt>Yıl</dt><dd>${esc([m.donem, tur].filter(Boolean).join(' · ') || '—')}</dd>
       </dl>
-      ${st ? `<span class="dbox-sure">${st}</span>` : ''}<small>${lc ? 'Son temas: ' + relPast(lc) : 'Görüşme yok'}${og ? ` · ${og} süre` : ''}</small>
+      ${st ? `<span class="dbox-sure">${st}</span>` : ''}${(() => { const r = acikRandevular().find(x => x.mid === m.id && daysUntil(x.tarih) >= 0); return r ? `<span class="dbox-rnd">📅 ${GUN_KISA(r.tarih)}${r.saat ? ' ' + r.saat : ''}</span>` : ''; })()}<small>${lc ? 'Son temas: ' + relPast(lc) : 'Görüşme yok'}${og ? ` · ${og} süre` : ''}</small>
     </a>`;
   }).join('')}</div>`
     : `<div class="list"><p class="empty">${q ? 'Eşleşen dosya yok.' : S.filter === 'aktif' ? 'Henüz dosya yok. <b>+</b> ile yeni dosya aç.' : 'Kapanan dosya yok.'}</p></div>`;
@@ -710,7 +714,9 @@ function drawMList() {
 function renderSureler() {
   const list = acikSureler().filter(a => !(a.m && !a.ek && daysUntil(a.d) < 0));
   const groups = [['Süresi geçenler', a => daysUntil(a.d) < 0], ['Bu hafta', a => daysUntil(a.d) >= 0 && daysUntil(a.d) <= 7], ['Bu ay', a => daysUntil(a.d) > 7 && daysUntil(a.d) <= 31], ['Daha sonra', a => daysUntil(a.d) > 31]];
+  const rs = acikRandevular();
   app.innerHTML = header('Süreler') + `<div class="page">
+    ${rs.length ? `<h2 class="sec">Randevular</h2><div class="list">${rs.map(r => randevuSatir(r)).join('')}</div>` : ''}
     ${groups.map(([t, f]) => { const g = list.filter(f); return g.length ? `<h2 class="sec">${t}</h2><div class="list">${g.map(a => sureRow(a.href, a.title, a.sub, a.d)).join('')}</div>` : ''; }).join('')
       || '<p class="empty">Açık süre yok. Dosyalarda <b>Süreler</b> sekmesinden ibraz, ek süre, cevap süreleri gibi tarihleri ekleyebilirsin.</p>'}
     <p class="footnote">Aktif dosyalardaki açık görevler ve inceleme bitiş süreleri listelenir.</p>
@@ -754,6 +760,8 @@ function renderDetail(id) {
             : k.eposta ? `<a class="call mail" href="mailto:${esc(k.eposta)}" aria-label="E-posta gönder">${I.mail}</a>` : ''}
         </div>`).join('')}</div>`
         : `<div class="list"><button class="row action" data-act="kisi" data-mid="${id}">Telefon / kişi ekle</button></div>`}
+
+      ${randevularHTML(m)}
 
       ${bilgiHTML(m)}
 
@@ -1453,6 +1461,96 @@ async function shareOrDownload(file) {
 }
 
 /* ---------- süreler ---------- */
+/* ---------- randevular (tutanak, görüşme…) ---------- */
+const RANDEVU_KONU = ['Tutanak', 'Defter ve belge ibrazı', 'İzahat / görüşme', 'Yoklama', 'Uzlaşma'];
+const RANDEVU_YER = [['daire', 'Dairede'], ['isyeri', 'Mükellefin işyerinde'], ['telefon', 'Telefonla / çevrim içi'], ['diger', 'Diğer']];
+const GUN_KISA = d => { const x = parseD(d); return `${x.toLocaleDateString('tr-TR', { weekday: 'short' })} ${x.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}`; };
+const randevuZaman = r => `${r.tarih}T${r.saat || '00:00'}`;
+const acikRandevular = () => all('randevu').filter(r => r.durum !== 'yapildi' && r.durum !== 'iptal' && S.items.get(r.mid) && isAktif(S.items.get(r.mid)))
+  .sort((a, b) => randevuZaman(a).localeCompare(randevuZaman(b)));
+const randevuYerAd = r => r.yer === 'diger' ? (r.yerNot || 'Diğer') : (RANDEVU_YER.find(([v]) => v === r.yer)?.[1] || '');
+const randevuNe = n => n < 0 ? 'geçti' : n === 0 ? 'bugün' : n === 1 ? 'yarın' : `${n} gün sonra`;
+function randevuSatir(r, { mukellefGoster = true } = {}) {
+  const n = daysUntil(r.tarih), m = S.items.get(r.mid);
+  const tone = r.durum === 'yapildi' ? 'done' : r.durum === 'iptal' ? 'iptal' : n < 0 ? 'red' : n <= 1 ? 'orange' : 'blue';
+  const alt = [!r.durum && n < 0 ? 'Sonucunu işaretle' : '', mukellefGoster && m ? kisaAd(m) : '', r.kisi, randevuYerAd(r)].filter(Boolean).join(' · ');
+  return `<div class="rnd-row ${tone}">
+    <button class="rnd-main" data-act="editRandevu" data-id="${r.id}">
+      <span class="rnd-zaman"><b>${r.saat || '—'}</b><small>${GUN_KISA(r.tarih)}</small></span>
+      <span class="rnd-tx"><b>${esc(r.konu || 'Randevu')}</b><small>${esc(alt)}</small></span>
+      ${r.durum === 'yapildi' ? '<span class="rnd-bd done">yapıldı</span>' : r.durum === 'iptal' ? '<span class="rnd-bd iptal">iptal</span>' : `<span class="rnd-bd ${tone}">${randevuNe(n)}</span>`}
+    </button>
+    ${r.durum || mukellefGoster ? '' : `<button class="icon-btn" data-act="icsRandevu" data-id="${r.id}" aria-label="Takvime ekle">${I.cal}</button>`}
+  </div>`;
+}
+function randevularHTML(m) {
+  const rs = byM('randevu', m.id);
+  const acik = rs.filter(r => !r.durum).sort((a, b) => randevuZaman(a).localeCompare(randevuZaman(b)));
+  const biten = rs.filter(r => r.durum).sort((a, b) => randevuZaman(b).localeCompare(randevuZaman(a)));
+  return `<div class="sec-row"><h2 class="sec">Randevular</h2><button class="btn link sm" data-act="newRandevu" data-mid="${m.id}">+ Ekle</button></div>
+    ${acik.length ? `<div class="list">${acik.map(r => randevuSatir(r, { mukellefGoster: false })).join('')}</div>` : '<p class="footnote">Mükellefe verdiğin tutanak ya da görüşme randevularını ekle; ana ekranda yaklaşanlar görünür.</p>'}
+    ${biten.length ? `<details class="done"><summary>${biten.length} geçmiş randevu</summary><div class="list">${biten.map(r => randevuSatir(r, { mukellefGoster: false })).join('')}</div></details>` : ''}`;
+}
+function randevuSheet(mid, r = null) {
+  // Az önce mükellef arandıysa gelecek kişi olarak o önerilir
+  const son = S.sonArama && Date.now() - S.sonArama.at < 3 * 3600e3 && (!mid || S.sonArama.mid === mid) ? S.sonArama : null;
+  const v = r || { konu: 'Tutanak', yer: 'daire', tarih: addDays(today(), 1), saat: '10:00', kisi: son?.kisi || '' };
+  const ms = all('mukellef').filter(isAktif).sort((a, b) => coll.compare(kisaAd(a), kisaAd(b)));
+  const m0 = mid ? S.items.get(mid) : null;
+  const kisiOpts = mk => (mk?.kisiler || []).map(x => `<option value="${esc(x.ad)}">`).join('');
+  const form = openSheet(r ? 'Randevuyu düzenle' : 'Yeni randevu', `
+    ${mid ? '' : `<label class="fld"><span>Mükellef</span><select name="mid" required><option value="">— Seç —</option>${ms.map(x => `<option value="${x.id}">${esc(kisaAd(x))}</option>`).join('')}</select></label>`}
+    <div class="row2">${field('Tarih', 'tarih', v.tarih, { type: 'date', required: true })}${field('Saat', 'saat', v.saat, { type: 'time' })}</div>
+    <p class="hint" id="rndGun"></p>
+    <div class="chips">${[['Yarın', 1], ['+2 gün', 2], ['+3 gün', 3], ['+1 hafta', 7]].map(([l, n]) => `<button type="button" class="chip" data-plus="${n}">${l}</button>`).join('')}</div>
+    ${field('Konu', 'konu', v.konu, { extra: 'list="rndKonu"' })}
+    <datalist id="rndKonu">${RANDEVU_KONU.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
+    ${field('Gelecek kişi', 'kisi', v.kisi, { extra: 'list="rndKisi"', placeholder: 'Mükellef, yetkili, SMMM…' })}
+    <datalist id="rndKisi">${kisiOpts(m0)}</datalist>
+    ${select('Yer', 'yer', v.yer, RANDEVU_YER)}
+    <div id="rndYerNot"${v.yer === 'diger' ? '' : ' hidden'}>${field('Yer açıklaması', 'yerNot', v.yerNot)}</div>
+    ${textarea('Not', 'not', v.not, 2, { placeholder: 'Getirilecek belgeler vb.' })}
+    ${r ? `<div class="btn-row">
+      <button type="button" class="btn${r.durum === 'yapildi' ? ' primary' : ''}" data-act="randevuDurum" data-id="${r.id}" data-v="${r.durum === 'yapildi' ? '' : 'yapildi'}">${r.durum === 'yapildi' ? '✓ Yapıldı' : 'Yapıldı olarak işaretle'}</button>
+      <button type="button" class="btn" data-act="randevuDurum" data-id="${r.id}" data-v="${r.durum === 'iptal' ? '' : 'iptal'}">${r.durum === 'iptal' ? 'İptali geri al' : 'İptal / gelmedi'}</button>
+    </div>
+    <button type="button" class="btn block danger-text" data-act="delRandevu" data-id="${r.id}">Sil</button>` : ''}`,
+  { onSubmit: async (f, fd) => {
+    const hedef = mid || fd.get('mid');
+    if (!hedef) { toast('Mükellefi seç'); return false; }
+    const item = r ? { ...r } : { id: uid(), kind: 'randevu', mid: hedef, durum: '' };
+    Object.assign(item, { tarih: fd.get('tarih'), saat: fd.get('saat') || '', konu: fd.get('konu').trim() || 'Randevu', kisi: fd.get('kisi').trim(),
+      yer: fd.get('yer'), yerNot: fd.get('yer') === 'diger' ? String(fd.get('yerNot') || '').trim() : '', not: fd.get('not').trim() });
+    await save(item);
+    if (!r) toast('Randevu kaydedildi', { label: 'Takvime ekle', fn: () => randevuIcs(item) });
+  } });
+  const e = form.elements;
+  const gun = () => { const t = e.tarih.value; const el = form.querySelector('#rndGun'); if (!t) { el.textContent = ''; return; }
+    const tat = sonIsGunu(t, { mali: false }); el.innerHTML = `${esc(parseD(t).toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }))} · ${randevuNe(daysUntil(t))}${tat.tarih !== t ? ` · ⚠️ ${esc(tat.nedenler.join(' ve '))}` : ''}`; };
+  e.tarih.addEventListener('input', gun); gun();
+  form.querySelector('.chips').onclick = ev => { const n = ev.target.dataset.plus; if (n) { e.tarih.value = addDays(today(), +n); gun(); } };
+  e.yer.addEventListener('change', () => { form.querySelector('#rndYerNot').hidden = e.yer.value !== 'diger'; });
+  if (e.mid) e.mid.addEventListener('change', () => { form.querySelector('#rndKisi').innerHTML = kisiOpts(S.items.get(e.mid.value)); });
+}
+function randevuIcs(r) {
+  const m = S.items.get(r.mid);
+  const esc2 = x => String(x || '').replace(/[\;,]/g, c => '\\' + c).replace(/\n/g, '\\n');
+  const title = `${r.konu || 'Randevu'}: ${m ? kisaAd(m) : ''}`;
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const bas = (r.tarih + 'T' + (r.saat || '09:00')).replace(/[-:]/g, '') + '00';
+  const alarm = (trig, t) => ['BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + esc2(t), 'TRIGGER:' + trig, 'END:VALARM'];
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//El Defteri//TR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    'BEGIN:VEVENT', `UID:${r.id}@el-defteri`, `DTSTAMP:${stamp}`, `DTSTART:${bas}`, 'DURATION:PT1H',
+    'SUMMARY:' + esc2(title), ...(randevuYerAd(r) ? ['LOCATION:' + esc2(randevuYerAd(r))] : []),
+    'DESCRIPTION:' + esc2([r.kisi && 'Gelecek: ' + r.kisi, r.not].filter(Boolean).join('\n')),
+    ...alarm('-P1D', title + ' (yarın)'), ...alarm('-PT1H', title + ' (1 saat sonra)'), 'END:VEVENT', 'END:VCALENDAR'];
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' });
+  const u = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: u, download: 'randevu.ics' });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 60000);
+}
+
 function surelerHTML(m) {
   const gs = byM('gorev', m.id);
   const open = gs.filter(g => !g.bitti).sort((a, b) => gorevSon(a).localeCompare(gorevSon(b)));
@@ -1553,7 +1651,7 @@ function renderSettings() {
     ${cloudOn() ? '' : `<div class="list">
       <button class="row action danger-text" data-act="wipe">Bu cihazdaki tüm verileri sil</button>
     </div>`}
-    <p class="footnote center">El Defteri 2.0 · sürüm 33</p>
+    <p class="footnote center">El Defteri 2.0 · sürüm 34</p>
   </div>${tabbar('ayarlar')}`;
   $('select[name=autolock]').onchange = e => { S.settings.autolock = +e.target.value; db.metaSet('settings', S.settings); toast('Kaydedildi'); };
   if (cloudOn()) drawSyncInfo();
@@ -1673,6 +1771,7 @@ function offerCallNote() {
     label: 'Not ekle',
     fn: () => { location.hash = `#/m/${pc.mid}/kayitlar`; kayitSheet(pc.mid, null, { tur: 'telefon', kisi: pc.kisi }); },
   });
+  S.sonArama = { mid: pc.mid, kisi: pc.kisi, at: Date.now() };
 }
 
 /* ---------- eylemler ---------- */
@@ -1690,7 +1789,7 @@ const ACT = {
   toggleDurum: async d => { const m = S.items.get(d.id); await save({ ...m, durum: isAktif(m) ? 'kapandi' : 'aktif' }); render(); },
   delM: async d => {
     const m = S.items.get(d.id);
-    if (!confirm(`“${m.unvan}” dosyası ve içindeki tüm notlar, ses kayıtları, bilgi isteme yazıları, inceleme verileri ve süreler silinsin mi? Bu işlem geri alınamaz.`)) return;
+    if (!confirm(`“${m.unvan}” dosyası ve içindeki tüm notlar, ses kayıtları, bilgi isteme yazıları, inceleme verileri, randevular ve süreler silinsin mi? Bu işlem geri alınamaz.`)) return;
     const kids = [...S.items.values()].filter(i => i.mid === m.id);
     const fileIds = kids.flatMap(i => i.kind === 'belge' || i.kind === 'veri' ? [i.fileId] : i.kind === 'kayit' ? (i.sesler || []).map(s => s.fileId) : []);
     await removeItems([m.id, ...kids.map(i => i.id)], fileIds);
@@ -1722,6 +1821,11 @@ const ACT = {
   topluBilgi: () => topluBilgiFlow(),
   veriYukle: d => veriYukleFlow(d.mid || null),
   veriAc: d => veriAc(d.id),
+  newRandevu: d => randevuSheet(d.mid || null),
+  editRandevu: d => { const r = S.items.get(d.id); randevuSheet(r.mid, r); },
+  icsRandevu: d => randevuIcs(S.items.get(d.id)),
+  randevuDurum: async d => { const r = S.items.get(d.id); await save({ ...r, durum: d.v || '' }); closeSheet(); render(); toast(d.v === 'yapildi' ? 'Randevu yapıldı olarak işaretlendi' : d.v === 'iptal' ? 'Randevu iptal edildi' : 'Randevu yeniden açıldı'); },
+  delRandevu: async d => { if (!confirm('Bu randevu silinsin mi?')) return; await removeItems([d.id]); closeSheet(); render(); },
   git: d => { location.hash = d.href; },
   aktarimYukle: () => aktarimFlow(),
   veriSil: async d => {
